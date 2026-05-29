@@ -1,0 +1,12 @@
+[worker]
+wasm = "dist/__kyushu_worker.wasm"
+port = 5987
+
+[[mounts]]
+host = "."
+guest = "/"
+writable = true
+
+[[env]]
+key = "API_KEY"
+value = "secret"

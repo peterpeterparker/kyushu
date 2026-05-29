@@ -1,0 +1,23 @@
+{
+  "name": "kyushu-site",
+  "version": "0.0.1",
+  "private": true,
+  "bugs": {
+    "url": "https://github.com/peterpeterparker/kyushu"
+  },
+  "license": "MIT",
+  "author": "David Dal Busco (https://daviddalbusco.com)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peterpeterparker/kyushu.git",
+    "directory": "packages/site"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "kuy kyushu.src.toml",
+    "dev": "kyu kyushu.run.toml"
+  },
+  "dependencies": {
+    "file-type": "^22.0.1"
+  }
+}

@@ -1,0 +1,29 @@
+package kyushu:worker;
+
+/// Custom interface used during `kyu build` to inject the JS bundle into the
+/// worker's Wasm memory via Wizer pre-initialization.
+///
+/// Why: WASI state (env vars, preopened dirs) is snapshotted by Wizer and would
+/// override runtime state provided by the runner. By using a custom host import
+/// instead of WASI filesystem or env vars, we avoid polluting the snapshot with
+/// build-time state, leaving the runtime free to provide its own env and mounts.
+///
+/// At runtime this import is stubbed out — the bundle is already frozen in memory.
+interface bundle {
+  get-bundle: func() -> string;
+}
+
+world worker {
+  // Inherit all imports and exports from standard wasi:http proxy
+  // @see https://github.com/WebAssembly/WASI
+  include wasi:http/proxy@0.2.11;
+
+  // Provides the JS bundle bytes during Wizer pre-initialization
+  import bundle;
+
+  // Called by Wizer to pre-initialize the worker with the JS bundle
+  export wizer-initialize: func();
+
+  // Exposes the worker version, baked in at compile time via CARGO_PKG_VERSION.
+  export get-version: func() -> string;
+}

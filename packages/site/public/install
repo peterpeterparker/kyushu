@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/peterpeterparker/kyushu/releases/latest/download/kyushu-cli-installer.sh | sh

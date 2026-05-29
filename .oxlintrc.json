@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "fix": {
+          "imports": "safe-fix",
+          "variables": "off"
+        }
+      }
+    ]
+  },
+  "env": {
+    "builtin": true
+  },
+  "ignorePatterns": ["crates/runtime/**/*", "cli/fixtures/**/*"]
+}

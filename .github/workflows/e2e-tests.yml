@@ -1,0 +1,24 @@
+name: E2E Tests
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build artifacts
+        uses: ./.github/actions/build-artifacts
+
+      - name: Copy artifacts
+        run: |
+          mkdir -p target/wasm32-wasip2/release target/release
+          cp out/kyushu_worker.wasm target/wasm32-wasip2/release/
+          cp out/kyu target/release/
+          chmod +x target/release/kyu
+
+      - name: Run integration tests
+        run: ./tests/env.test.sh

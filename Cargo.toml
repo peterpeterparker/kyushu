@@ -1,0 +1,32 @@
+[workspace]
+members = ["cli", "worker", "crates/runtime"]
+resolver = "2"
+
+[workspace.package]
+repository = "https://github.com/peterpeterparker/kyushu"
+
+[workspace.dependencies]
+rquickjs = { version = "0.12.0", features = ["macro", "futures", "std", "bindgen", "loader"] }
+
+# wstd is pinned in runtime source
+wstd = "=0.6.5"
+
+[profile.release]
+# removes unused code at link time
+lto = "thin"
+
+[profile.release.package.kyushu-worker]
+# optimize for size rather than speed
+opt-level = "s"
+
+[profile.release.package.kyushu-runtime]
+opt-level = "s"
+
+# the profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+
+# required for the runtime
+[patch.crates-io]
+rusqlite = { git = "https://github.com/golemcloud/rusqlite", branch = "v0.38.0-patched" }
+libsqlite3-sys = { git = "https://github.com/golemcloud/rusqlite", branch = "v0.38.0-patched" }

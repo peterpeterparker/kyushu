@@ -1,0 +1,49 @@
+{
+  "name": "kyushu-types",
+  "version": "0.0.1",
+  "description": "TypeScript types for Kyushu workers",
+  "bugs": {
+    "url": "https://github.com/peterpeterparker/kyushu"
+  },
+  "license": "MIT",
+  "author": "David Dal Busco (https://daviddalbusco.com)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/peterpeterparker/kyushu.git",
+    "directory": "packages/types"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.mjs"
+      }
+    }
+  },
+  "scripts": {
+    "rmdir": "node ./scripts/rmdir.mjs",
+    "ts-declaration": "tsc --emitDeclarationOnly --outDir dist/types",
+    "build": "pnpm run rmdir && mkdir -p dist && node ./scripts/esbuild.mjs && pnpm run ts-declaration",
+    "prepack": "npm run build",
+    "test": "tsc --project tsconfig.spec.json --noEmit && vitest"
+  },
+  "dependencies": {
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.0",
+    "vitest": "^4.1.7"
+  }
+}

@@ -1,0 +1,2 @@
+entry = "tests/fixtures/env/index.ts"
+outdir = "dist"

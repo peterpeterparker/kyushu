@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "declaration": true,
+    "target": "esnext",
+    "lib": ["esnext", "dom"],
+    "strict": true,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "skipLibCheck": true,
+    "rootDir": ".",
+    "outDir": "./dist",
+    "types": ["node"]
+  }
+}

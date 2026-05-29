@@ -1,0 +1,7 @@
+packages:
+  - packages/types
+  - packages/site
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAge: 10080 # ignore dependency updates released less than 7 days ago

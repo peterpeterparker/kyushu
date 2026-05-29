@@ -1,0 +1,6 @@
+[worker]
+wasm = "dist/__kyushu_worker.wasm"
+
+[[mounts]]
+host = "public"
+guest = "/public"

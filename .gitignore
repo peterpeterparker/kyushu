@@ -1,0 +1,20 @@
+*~
+*.sw[mnpcod]
+*.log
+*.tmp
+*.tmp.*
+log.txt
+*.sublime-project
+*.sublime-workspace
+.idea/
+.vscode/
+npm-debug.log*
+
+dist
+
+# Cargo
+/target
+/out
+
+# Node
+node_modules
