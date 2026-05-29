@@ -15,9 +15,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN cargo install cargo-component --locked
 RUN cargo install wasm-tools --locked
 
+# Worker builds the types to embed the schema validator
+COPY .node-version .node-version
+RUN curl --fail -sSf https://raw.githubusercontent.com/creationix/nvm/v0.40.3/install.sh | bash
+ENV NVM_DIR=/root/.nvm
+RUN . "$NVM_DIR/nvm.sh" && nvm install "$(cat .node-version)"
+RUN . "$NVM_DIR/nvm.sh" && nvm use "v$(cat .node-version)"
+RUN . "$NVM_DIR/nvm.sh" && nvm alias default "v$(cat .node-version)"
+RUN ln -s "$NVM_DIR/versions/node/v$(cat .node-version)" "$NVM_DIR/versions/node/default"
+ENV PATH="$NVM_DIR/versions/node/default/bin/:${PATH}"
+RUN node --version
+RUN npm --version
+
+COPY package.json .
+RUN npm install -g pnpm@$(node -e "console.log(require('./package.json').packageManager.split('@')[1])")
+
 WORKDIR /app
 
 COPY . .
+
+RUN pnpm install --frozen-lockfile
 
 RUN cargo component build --target wasm32-wasip2 -p kyushu-worker --release
 
