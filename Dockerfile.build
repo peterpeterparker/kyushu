@@ -38,7 +38,7 @@ RUN pnpm install --frozen-lockfile
 
 RUN cargo component build --target wasm32-wasip2 -p kyushu-worker --release
 
-# We use the local component for testing. The Dockerfile is not used to release the CLI.
+# We use the local component for testing. The Dockerfile.build is not used to release the CLI.
 RUN cargo build -p kyushu-cli --release --features local-worker
 
 FROM scratch AS export
