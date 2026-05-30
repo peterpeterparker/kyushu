@@ -29,8 +29,8 @@ jobs:
 
       - name: Update worker wasm
         run: |
-          mkdir -p cli/src/resources
-          cp out/kyushu_worker.wasm cli/src/resources/kyushu_worker.wasm
+          mkdir -p cli/resources
+          cp out/kyushu_worker.wasm cli/resources/kyushu_worker.wasm
 
       - name: Create Pull Request
         uses: ./.github/actions/create-pr
