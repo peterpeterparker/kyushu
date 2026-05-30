@@ -5,3 +5,6 @@ allowBuilds:
   esbuild: true
 
 minimumReleaseAge: 2880 # ignore dependency updates released less than 2 days ago
+
+minimumReleaseAgeExclude:
+  - kyushu-types@0.0.3

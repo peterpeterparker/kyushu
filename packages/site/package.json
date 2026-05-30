@@ -19,5 +19,8 @@
   },
   "dependencies": {
     "file-type": "^22.0.1"
+  },
+  "devDependencies": {
+    "kyushu-types": "^0.0.3"
   }
 }
