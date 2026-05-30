@@ -225,6 +225,10 @@ importers:
       file-type:
         specifier: ^22.0.1
         version: 22.0.1
+    devDependencies:
+      kyushu-types:
+        specifier: ^0.0.3
+        version: 0.0.3
 
   packages/types:
     dependencies:
@@ -876,6 +880,9 @@ packages:
 
   ieee754@1.2.1:
     resolution: {integrity: sha512-dcyqhDvX1C46lXZcVqCpK+FtMRQVdIMN6/Df5js2zouUsqG7I6sFxitIC+7KYK29KdXOLHdu9zL4sFnoVQnqaA==}
+
+  kyushu-types@0.0.3:
+    resolution: {integrity: sha512-wrUZ4nM8kgx7hfNOM0rrAMKfBmO3AgJ8sqvpaEHz2C7ZIPHfR4pAB19cVlT2DHeNs0USqymIuQtoB4uelTmb7A==}
 
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
@@ -1567,6 +1574,10 @@ snapshots:
     optional: true
 
   ieee754@1.2.1: {}
+
+  kyushu-types@0.0.3:
+    dependencies:
+      zod: 4.4.3
 
   lightningcss-android-arm64@1.32.0:
     optional: true
