@@ -1,0 +1,26 @@
+name: Types Release
+
+on:
+  push:
+    tags:
+      - "types/v[0-9]+.[0-9]+.[0-9]+*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Publish
+        run: pnpm --filter kyushu-types publish --no-git-checks --access public --provenance
