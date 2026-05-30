@@ -23,4 +23,4 @@ jobs:
         uses: ./.github/actions/prepare
 
       - name: Publish
-        run: pnpm --filter kyushu-types publish --no-git-checks --access public --provenance
+        run: pnpm --filter kyushu-types stage publish --no-git-checks --access public --provenance
