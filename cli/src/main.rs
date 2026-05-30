@@ -14,12 +14,12 @@ mod worker;
 enum Cli {
     /// Run a Wasm module and serve it over HTTP
     Run {
-        #[arg(default_value = "kyushu.toml")]
+        #[arg(default_value = "kyushu.run.toml")]
         config: String,
     },
     /// Build the worker Wasm from JS/TS source
     Build {
-        #[arg(default_value = "kyushu.toml")]
+        #[arg(default_value = "kyushu.build.toml")]
         config: String,
     },
 }

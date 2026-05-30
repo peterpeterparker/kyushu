@@ -71,7 +71,7 @@ export default {
 **2. Create a build config**
 
 ```toml
-# kyushu.src.toml
+# kyushu.build.toml
 entry = "src/index.ts"
 outdir = "dist"
 ```
@@ -79,7 +79,7 @@ outdir = "dist"
 **3. Build**
 
 ```bash
-kyu build kyushu.src.toml
+kyu build
 ```
 
 This produces `dist/__kyushu_worker.wasm`.
@@ -105,7 +105,7 @@ value = "secret"
 **5. Run**
 
 ```bash
-kyu run kyushu.run.toml
+kyu run
 # Listening on http://0.0.0.0:5987
 ```
 
@@ -119,7 +119,7 @@ npm install --save-dev kyushu-types
 
 ## Config reference
 
-### `kyushu.src.toml` - build config
+### `kyushu.build.toml` - build config
 
 | Field    | Type   | Description                                       |
 | -------- | ------ | ------------------------------------------------- |
@@ -191,6 +191,8 @@ kyu build <config>   Bundle and pre-initialize a worker
 kyu run <config>     Run a built worker
 kyu --version        Print the CLI version
 ```
+
+If no config is provided, `kyu build` looks for `kyushu.build.toml` and kyu run looks for `kyushu.run.toml`. Pass an explicit path to override.
 
 ## Known Limitations
 
