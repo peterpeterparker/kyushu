@@ -4,4 +4,4 @@ packages:
 allowBuilds:
   esbuild: true
 
-minimumReleaseAge: 10080 # ignore dependency updates released less than 7 days ago
+minimumReleaseAge: 2880 # ignore dependency updates released less than 2 days ago
