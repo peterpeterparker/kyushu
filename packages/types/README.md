@@ -6,7 +6,7 @@
 [npm-license]: https://img.shields.io/npm/l/kyushu-types
 [npm-license-url]: https://github.com/junobuild/juno-js/blob/main/LICENSE
 
-# Juno JavaScript utils
+# Kyushu Types
 
 TypeScript types for Kyushu workers.
 
