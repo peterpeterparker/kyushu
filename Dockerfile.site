@@ -1,0 +1,43 @@
+FROM debian:bookworm-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    tar \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node and pnpm
+COPY .node-version .node-version
+RUN curl --fail -sSf https://raw.githubusercontent.com/creationix/nvm/v0.40.3/install.sh | bash
+ENV NVM_DIR=/root/.nvm
+RUN . "$NVM_DIR/nvm.sh" && nvm install "$(cat .node-version)"
+RUN . "$NVM_DIR/nvm.sh" && nvm use "v$(cat .node-version)"
+RUN . "$NVM_DIR/nvm.sh" && nvm alias default "v$(cat .node-version)"
+RUN ln -s "$NVM_DIR/versions/node/v$(cat .node-version)" "$NVM_DIR/versions/node/default"
+ENV PATH="$NVM_DIR/versions/node/default/bin/:${PATH}"
+RUN node --version
+RUN npm --version
+
+COPY package.json .
+RUN npm install -g pnpm@$(node -e "console.log(require('./package.json').packageManager.split('@')[1])")
+
+# kyu CLI
+RUN curl --proto '=https' --tlsv1.2 -LsSf https://github.com/peterpeterparker/kyushu/releases/download/cli/v0.0.1/kyushu-cli-installer.sh | sh
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+
+RUN cd packages/site && kyu build kyushu.src.toml
+
+RUN mkdir -p /out/dist && \
+    cp packages/site/dist/__kyushu_worker.wasm /out/dist/ && \
+    cp packages/site/kyushu.run.toml /out/ && \
+    cp -r packages/site/public /out/public && \
+    tar -czf /site.tar.gz -C /out .
+
+FROM scratch AS export
+COPY --from=builder /site.tar.gz /
