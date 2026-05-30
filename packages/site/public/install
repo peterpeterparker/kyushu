@@ -2,4 +2,4 @@
 
 set -euo pipefail
 
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/peterpeterparker/kyushu/releases/latest/download/kyushu-cli-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/peterpeterparker/kyushu/releases/download/cli/v0.0.1/kyushu-cli-installer.sh | sh
