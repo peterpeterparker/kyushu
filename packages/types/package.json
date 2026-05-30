@@ -1,6 +1,6 @@
 {
   "name": "kyushu-types",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "TypeScript types for Kyushu workers",
   "bugs": {
     "url": "https://github.com/peterpeterparker/kyushu"
