@@ -14,7 +14,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "kuy kyushu.src.toml",
+    "build": "kuy kyushu.build.toml",
     "dev": "kyu kyushu.run.toml"
   },
   "dependencies": {

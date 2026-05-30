@@ -9,7 +9,7 @@ echo "Building cli source..."
 cargo build -p kyushu-cli --features local-worker
 
 echo "Building demo..."
-./target/debug/kyu build examples/kyushu.src.toml
+./target/debug/kyu build examples/kyushu.build.toml
 
 echo "Starting demo..."
 ./target/debug/kyu run examples/kyushu.run.toml
