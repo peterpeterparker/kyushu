@@ -3,7 +3,7 @@
 set -e
 
 echo "Building worker..."
-./target/release/kyu build tests/fixtures/env/kyushu.src.toml
+./target/release/kyu build tests/fixtures/env/kyushu.build.toml
 
 echo "Starting runner..."
 ./target/release/kyu run tests/fixtures/env/kyushu.run.toml &
