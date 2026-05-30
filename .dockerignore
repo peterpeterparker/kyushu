@@ -3,7 +3,8 @@
 # invalidate the layer cache.
 node_modules
 dist
-Dockerfile
+Dockerfile.build
+Dockerfile.site
 *.wasm
 *.swp
 target
