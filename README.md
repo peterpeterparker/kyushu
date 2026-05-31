@@ -169,6 +169,16 @@ export default {
 | `body`    | `string` \| `ArrayBuffer` \| `Uint8Array` \| `undefined` | Response body                     |
 | `headers` | `Record<string, string>` \| `undefined`                  | Response headers                  |
 
+## CLI reference
+
+```
+kyu build <config>   Bundle and pre-initialize a worker
+kyu run <config>     Run a built worker
+kyu --version        Print the CLI version
+```
+
+If no config is provided, `kyu build` looks for `kyushu.build.toml` and kyu run looks for `kyushu.run.toml`. Pass an explicit path to override.
+
 ## Security
 
 > [!CAUTION]
@@ -183,16 +193,6 @@ However, there are important caveats:
 - **Experimental status**: Kyushu itself has not been audited. The sandboxing boundaries, configuration parsing, and request handling are all early-stage code.
 
 Use Kyushu for experimentation, local development, and learning. Do not expose it to untrusted input in production without a thorough review.
-
-## CLI reference
-
-```
-kyu build <config>   Bundle and pre-initialize a worker
-kyu run <config>     Run a built worker
-kyu --version        Print the CLI version
-```
-
-If no config is provided, `kyu build` looks for `kyushu.build.toml` and kyu run looks for `kyushu.run.toml`. Pass an explicit path to override.
 
 ## Known Limitations
 
