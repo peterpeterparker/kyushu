@@ -188,7 +188,7 @@ Your JavaScript runs inside a [Wasmtime](https://wasmtime.io) WebAssembly sandbo
 
 However, there are important caveats:
 
-- **JavaScript polyfills**: The QuickJS runtime is extended with Node.js-compatible polyfills from the [wasm-rquickjs](https://github.com/nicolo-ribaudo/wasm-rquickjs) project (Apache 2.0). These polyfills have not been independently audited for security. They are a third-party dependency and are used as-is.
+- **JavaScript polyfills**: The QuickJS runtime is extended with Node.js-compatible polyfills from the [wasm-rquickjs](https://github.com/nicolo-ribaudo/wasm-rquickjs) project. These polyfills have not been independently audited for security. They are a third-party dependency and are used as-is.
 - **No review of polyfill internals**: The polyfills implement Node.js APIs (`fs`, `crypto`, `http`, etc.) inside the Wasm sandbox. Their correctness and security properties have not been reviewed by the Kyushu project.
 - **Experimental status**: Kyushu itself has not been audited. The sandboxing boundaries, configuration parsing, and request handling are all early-stage code.
 
