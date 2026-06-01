@@ -1,9 +1,9 @@
-name: Site Release
+name: Docs Release
 
 on:
   push:
     tags:
-      - "site/v[0-9]+.[0-9]+.[0-9]+*"
+      - "docs/v[0-9]+.[0-9]+.[0-9]+*"
 
 jobs:
   release:
@@ -24,5 +24,5 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
-          files: site.tar.gz
+          files: docs.tar.gz
           name: ${{ github.ref_name }}
