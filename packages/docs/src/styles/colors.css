@@ -14,17 +14,17 @@
   --sl-color-gray-6: #1b1818;
   --sl-color-black: #131010;
 
-  /* note — teal accent */
-  --sl-color-blue-low: #0d2e27;
-  --sl-color-blue: #99ffe4;
-  --sl-color-blue-high: #ccfff2;
+  /* note — vesper pink */
+  --sl-color-blue-low: #2e0d2e;
+  --sl-color-blue: #f4a8f8;
+  --sl-color-blue-high: #fad4fb;
 
-  /* tip — vesper gold */
+  /* tip — vesper mint */
   --sl-color-purple-low: #0d2e27;
   --sl-color-purple: #99ffe4;
   --sl-color-purple-high: #ccfff2;
 
-  /* caution — yellow distinct from gold */
+  /* caution — yellow */
   --sl-color-orange-low: #2a2000;
   --sl-color-orange: #ffdd57;
   --sl-color-orange-high: #fff0a0;
@@ -52,14 +52,14 @@
   --sl-color-gray-7: #f5f5f5;
   --sl-color-black: #ffffff;
 
-  /* note */
-  --sl-color-blue-low: #d0fff5;
-  --sl-color-blue: #00a882;
-  --sl-color-blue-high: #006655;
+  /* note — pink */
+  --sl-color-blue-low: #fde8fe;
+  --sl-color-blue: #a835ad;
+  --sl-color-blue-high: #6e2070;
 
-  /* tip */
+  /* tip — mint */
   --sl-color-purple-low: #d0fff5;
-  --sl-color-purple: #99ffe4;
+  --sl-color-purple: #00896a;
   --sl-color-purple-high: #006655;
 
   /* caution */
