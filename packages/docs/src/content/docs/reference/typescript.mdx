@@ -64,9 +64,9 @@ The HTTP response returned by the `fetch` handler.
 
 ## WorkerMethod
 
-```typescript
-type WorkerMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
-```
+import WorkerMethod from "./components/worker-method.md";
+
+<WorkerMethod />
 
 ## Runtime validation
 
@@ -74,6 +74,6 @@ The worker validates both the incoming request and outgoing response using [Zod]
 
 The schemas are also exported from `kyushu-types` if you need them directly:
 
-```typescript
-import { WorkerRequestSchema, WorkerResponseSchema, ExportedHandlerSchema } from "kyushu-types";
-```
+import Zod from "./components/zod.md";
+
+<Zod />
