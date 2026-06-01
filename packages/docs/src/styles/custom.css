@@ -72,7 +72,7 @@
 }
 
 :root {
-  --sl-color-bg-nav: inherit;
+  --sl-color-bg-nav: var(--sl-color-black);
   --sl-color-bg-sidebar: inherit;
 }
 
