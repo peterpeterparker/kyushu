@@ -10,15 +10,26 @@ export default defineConfig({
   markdown: {
     remarkPlugins: [remarkGfm],
   },
+  devToolbar: {
+    enabled: false,
+  },
   integrations: [
     starlight({
       title: "Kyushu",
+      logo: {
+        light: "./src/assets/logo-light.svg",
+        dark: "./src/assets/logo-dark.svg",
+        replacesTitle: true,
+      },
+      lastUpdated: !process.env.CI,
+      favicon: "/favicon.svg",
       customCss: [
         "./src/styles/colors.css",
         "./src/styles/code.css",
         "./src/styles/search.css",
         "./src/styles/sidebar.css",
         "./src/styles/nav.css",
+        "./src/styles/header.css",
       ],
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/peterpeterparker/kyushu" },
