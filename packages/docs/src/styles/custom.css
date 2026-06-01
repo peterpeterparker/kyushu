@@ -1,0 +1,86 @@
+/* Dark mode colors. */
+:root {
+  --sl-color-accent-low: #2a2a2a;
+  --sl-color-accent: #7e7e7e;
+  --sl-color-accent-high: #c0c0c0;
+
+  --sl-color-white: #f2eeee;
+  --sl-color-gray-1: #b8b2b2;
+  --sl-color-gray-2: #b8b2b2;
+  --sl-color-gray-3: #4a4545;
+  --sl-color-gray-4: #3d3838;
+  --sl-color-gray-5: #292424;
+  --sl-color-gray-6: #1b1818;
+  --sl-color-black: #131010;
+
+  /* note — teal accent */
+  --sl-color-blue-low: #0d2e27;
+  --sl-color-blue: #99ffe4;
+  --sl-color-blue-high: #ccfff2;
+
+  /* tip — vesper gold */
+  --sl-color-purple-low: #0d2e27;
+  --sl-color-purple: #99ffe4;
+  --sl-color-purple-high: #ccfff2;
+
+  /* caution — yellow distinct from gold */
+  --sl-color-orange-low: #2a2000;
+  --sl-color-orange: #ffdd57;
+  --sl-color-orange-high: #fff0a0;
+
+  /* danger — red */
+  --sl-color-red-low: #2a0f0f;
+  --sl-color-red: #ff8080;
+  --sl-color-red-high: #ffbfbf;
+}
+
+/* Light mode colors. */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #d8d8d8;
+  --sl-color-accent: #7e7e7e;
+  --sl-color-accent-high: #2a2a2a;
+
+  --sl-color-white: #101010;
+  --sl-color-gray-1: #282828;
+  --sl-color-gray-2: #454545;
+  --sl-color-gray-3: #6e6e6e;
+  --sl-color-gray-4: #b0b0b0;
+  --sl-color-gray-5: #d8d8d8;
+  --sl-color-gray-6: #ebebeb;
+  --sl-color-gray-7: #f5f5f5;
+  --sl-color-black: #ffffff;
+
+  /* note */
+  --sl-color-blue-low: #d0fff5;
+  --sl-color-blue: #00a882;
+  --sl-color-blue-high: #006655;
+
+  /* tip */
+  --sl-color-purple-low: #d0fff5;
+  --sl-color-purple: #99ffe4;
+  --sl-color-purple-high: #006655;
+
+  /* caution */
+  --sl-color-orange-low: #fff8d0;
+  --sl-color-orange: #8a7000;
+  --sl-color-orange-high: #5a4800;
+
+  /* danger */
+  --sl-color-red-low: #ffe0e0;
+  --sl-color-red: #cc0000;
+  --sl-color-red-high: #880000;
+}
+
+:root {
+  --sl-color-bg-nav: inherit;
+  --sl-color-bg-sidebar: inherit;
+}
+
+:root[data-theme="light"] {
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #ffffff;
+}
+
+:root[data-theme="dark"] {
+  --sl-color-hairline-shade: #3d3838;
+}

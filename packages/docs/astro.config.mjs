@@ -13,9 +13,13 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "Kyushu",
+      customCss: ["./src/styles/custom.css", "./src/styles/code.css"],
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/peterpeterparker/kyushu" },
       ],
+      expressiveCode: {
+        themes: ["vesper"],
+      },
       sidebar: [
         { label: "Start Here", items: [{ slug: "getting-started" }] },
         {
