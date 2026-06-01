@@ -5,6 +5,7 @@
   --sl-color-accent-high: #c0c0c0;
 
   --sl-color-white: #f2eeee;
+  --sl-color-white-rgb: 242, 238, 238;
   --sl-color-gray-1: #b8b2b2;
   --sl-color-gray-2: #b8b2b2;
   --sl-color-gray-3: #4a4545;
@@ -41,6 +42,7 @@
   --sl-color-accent-high: #2a2a2a;
 
   --sl-color-white: #101010;
+  --sl-color-white-rgb: 16, 16, 16;
   --sl-color-gray-1: #282828;
   --sl-color-gray-2: #454545;
   --sl-color-gray-3: #6e6e6e;

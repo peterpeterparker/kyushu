@@ -1,0 +1,21 @@
+nav.sidebar li {
+  border-inline-start: none;
+  padding-inline-start: 0;
+}
+
+nav.sidebar li > a {
+  border: 1px solid transparent;
+}
+
+nav.sidebar li > a[aria-current="page"] {
+  border-left: 1px solid var(--sl-color-text-accent);
+  border-radius: 0;
+  font-weight: inherit;
+  background: rgba(var(--sl-color-white-rgb), 0.06);
+  color: var(--sl-color-white);
+}
+
+nav.sidebar li > a[aria-current="page"]:hover,
+nav.sidebar li > a[aria-current="page"]:focus {
+  color: var(--sl-color-white);
+}
