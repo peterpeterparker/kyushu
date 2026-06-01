@@ -1,2 +1,2 @@
-entry = "src/index.ts"
+entry = "src/server.ts"
 outdir = "dist"

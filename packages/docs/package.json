@@ -14,11 +14,17 @@
   },
   "type": "module",
   "scripts": {
-    "build": "kuy kyushu.build.toml",
-    "dev": "kyu kyushu.run.toml"
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
   },
   "dependencies": {
-    "file-type": "^22.0.1"
+    "@astrojs/starlight": "^0.39.2",
+    "astro": "^6.4.2",
+    "file-type": "^22.0.1",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "kyushu-types": "^0.0.3"
