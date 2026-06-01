@@ -220,7 +220,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
-  packages/site:
+  packages/docs:
     dependencies:
       file-type:
         specifier: ^22.0.1

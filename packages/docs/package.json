@@ -1,5 +1,5 @@
 {
-  "name": "kyushu-site",
+  "name": "kyushu-docs",
   "version": "0.0.2",
   "private": true,
   "bugs": {
@@ -10,7 +10,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/peterpeterparker/kyushu.git",
-    "directory": "packages/site"
+    "directory": "packages/docs"
   },
   "type": "module",
   "scripts": {

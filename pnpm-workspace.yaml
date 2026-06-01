@@ -1,6 +1,6 @@
 packages:
   - packages/types
-  - packages/site
+  - packages/docs
 allowBuilds:
   esbuild: true
 
