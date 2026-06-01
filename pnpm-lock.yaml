@@ -231,6 +231,9 @@ importers:
       file-type:
         specifier: ^22.0.1
         version: 22.0.1
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
       sharp:
         specifier: ^0.34.5
         version: 0.34.5

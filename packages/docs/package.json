@@ -24,6 +24,7 @@
     "@astrojs/starlight": "^0.39.2",
     "astro": "^6.4.2",
     "file-type": "^22.0.1",
+    "remark-gfm": "^4.0.1",
     "sharp": "^0.34.5"
   },
   "devDependencies": {

@@ -1,0 +1,111 @@
+---
+title: Getting Started
+description: Install Kyushu and run your first worker.
+sidebar:
+  order: 1
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+Kyushu lets you write a JavaScript or TypeScript worker, and run it anywhere within a WebAssembly sandbox. No Node.js, Bun or Docker. This guide walks you through getting your first worker up and running.
+
+:::caution
+Kyushu is an early-stage experiment. Expect breaking changes, missing features, and rough edges. Not recommended for production use.
+:::
+
+## Install
+
+Open a terminal window and install the command line tool `kyu`.
+
+```bash
+curl -fsSL https://kyushu.dev/install | bash
+```
+
+Or download a pre-built binary from the [releases page](https://github.com/peterpeterparker/kyushu/releases).
+
+:::tip
+`kyu` has two commands: `build` to compile your worker, and `run` to serve it. You can install it on your local machine for development, on a VPS to serve traffic, or both.
+:::
+
+## Your first worker
+
+The following steps take you from a blank TypeScript file to a running HTTP handler.
+
+<Steps>
+
+1. **Write a worker**
+
+   Create `src/index.ts` with a simple fetch handler:
+
+   ```typescript
+   import type { ExportedHandler } from "kyushu-types";
+
+   export default {
+     async fetch(request) {
+       return {
+         status: 200,
+         headers: { "content-type": "application/json" },
+         body: JSON.stringify({ hello: "world" }),
+       };
+     },
+   } satisfies ExportedHandler;
+   ```
+
+2. **Create a build config**
+
+   Create `kyushu.build.toml` at the root of your project:
+
+   ```toml
+   entry = "src/index.ts"
+   outdir = "dist"
+   ```
+
+3. **Build the worker**
+
+   Run this on your development machine. It bundles your code and produces a self-contained `.wasm` file.
+
+   ```bash
+   kyu build
+   ```
+
+   You should see `dist/__kyushu_worker.wasm` appear.
+
+4. **Create a run config**
+
+   Create `kyushu.run.toml`. This tells `kyu run` where the worker is, what port to listen on, and what the sandbox has access to.
+
+   ```toml
+   [worker]
+   wasm = "dist/__kyushu_worker.wasm"
+   port = 5987
+
+   [[mounts]]
+   host = "."
+   guest = "/"
+
+   [[env]]
+   key = "API_KEY"
+   value = "secret"
+   ```
+
+5. **Run the worker**
+
+   Run this wherever you want to serve requests.
+
+   ```bash
+   kyu run
+   # Listening on http://0.0.0.0:5987
+   ```
+
+   Test it:
+
+   ```bash
+   curl http://localhost:5987
+   # {"hello":"world"}
+   ```
+
+</Steps>
+
+## TypeScript types
+
+For autocompletion, install the `kyushu-types` library. See the [TypeScript reference](/reference/typescript) for the full API.

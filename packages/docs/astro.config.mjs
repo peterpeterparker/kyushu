@@ -1,11 +1,15 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import remarkGfm from "remark-gfm";
 
 export default defineConfig({
   site: "https://kyushu.dev",
   output: "static",
   outDir: "build",
+  markdown: {
+    remarkPlugins: [remarkGfm],
+  },
   integrations: [
     starlight({
       title: "Kyushu",
@@ -13,17 +17,20 @@ export default defineConfig({
         { icon: "github", label: "GitHub", href: "https://github.com/peterpeterparker/kyushu" },
       ],
       sidebar: [
+        { label: "Start Here", items: [{ slug: "getting-started" }] },
         {
-          label: "Guides",
+          label: "Reference",
           items: [
-            // Each item here is one entry in the navigation menu.
-            { label: "Example Guide", slug: "guides/example" },
+            { slug: "reference/cli" },
+            { slug: "reference/configuration" },
+            { slug: "reference/typescript" },
           ],
         },
         {
-          label: "Reference",
-          items: [{ autogenerate: { directory: "reference" } }],
+          label: "Guides",
+          items: [{ slug: "guides/deploy" }],
         },
+        { slug: "known-limitations" },
       ],
     }),
   ],
