@@ -4,7 +4,7 @@
 node_modules
 dist
 Dockerfile.build
-Dockerfile.site
+Dockerfile.docs
 *.wasm
 *.swp
 target

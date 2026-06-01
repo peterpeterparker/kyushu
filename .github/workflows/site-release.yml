@@ -19,7 +19,7 @@ jobs:
 
       - name: Build site
         run: |
-          docker build --target export --output type=local,dest=. -f Dockerfile.site .
+          docker build --target export --output type=local,dest=. -f Dockerfile.docs .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
