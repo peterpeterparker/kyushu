@@ -1,0 +1,81 @@
+---
+import { LinkButton } from '@astrojs/starlight/components';
+---
+
+<section class="about not-content">
+    <h2>What is Kyushu?</h2>
+    <p>Kyushu is an open source CLI that lets you write a JavaScript or TypeScript worker, build it into a self-contained WebAssembly binary, and run it anywhere with one command - <code>kyu</code>.</p>
+
+    <ul>
+        <li>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span><strong>No Node, Bun, or Docker</strong> - just a single binary</span>
+        </li>
+        <li>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span><strong>Cloudflare Workers-style API</strong> - familiar <code>fetch</code> handler</span>
+        </li>
+        <li>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span><strong>Self-hostable</strong> - runs on a VPS or anywhere</span>
+        </li>
+        <li>
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span><strong>WebAssembly sandbox</strong> - isolated from the host</span>
+        </li>
+    </ul>
+
+    <LinkButton href="/getting-started" variant="minimal" icon="right-arrow">Read docs</LinkButton>
+</section>
+
+<style>
+    .about {
+        padding-block: clamp(2rem, 5vw, 4rem);
+        border-top: 0.5px solid var(--sl-color-gray-5);
+        max-width: 60ch;
+    }
+
+    .about h2 {
+        font-size: var(--sl-text-2xl);
+        font-weight: 600;
+        color: var(--sl-color-white);
+        margin-bottom: 1rem;
+    }
+
+    .about > p {
+        font-size: var(--sl-text-body);
+        color: var(--sl-color-gray-2);
+        margin-bottom: 2rem;
+    }
+
+    .about ul {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 2rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.875rem;
+    }
+
+    .about li {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        font-size: var(--sl-text-body);
+        color: var(--sl-color-gray-2);
+    }
+
+    .about li svg {
+        flex-shrink: 0;
+        margin-top: 3px;
+        color: var(--sl-color-accent);
+    }
+
+    .about li strong {
+        color: var(--sl-color-white);
+    }
+
+    .about li code {
+        font-size: 0.875em;
+    }
+</style>
