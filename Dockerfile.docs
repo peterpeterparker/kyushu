@@ -33,7 +33,7 @@ RUN pnpm install --frozen-lockfile
 
 RUN cd packages/docs && kyu build
 
-RUN mkdir -p /out/dist && \
+RUN mkdir -p /out/worker && \
     cp packages/docs/worker/__kyushu_worker.wasm /out/worker/ && \
     cp packages/docs/kyushu.run.toml /out/ && \
     cp -r packages/docs/dist /out/dist && \
