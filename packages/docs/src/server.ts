@@ -18,7 +18,7 @@ export default {
     const { pathname } = url;
 
     const sanitizedPathname = pathname === "/" ? "/index.html" : pathname;
-    const filepath = join(process.cwd(), "public", sanitizedPathname);
+    const filepath = join(process.cwd(), "dist", sanitizedPathname);
 
     try {
       await access(filepath);

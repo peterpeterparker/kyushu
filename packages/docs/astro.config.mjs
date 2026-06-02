@@ -9,7 +9,7 @@ const description = "A self-hostable Wasm sandbox for JavaScript workers.";
 export default defineConfig({
   site: "https://kyushu.dev",
   output: "static",
-  outDir: "build",
+  outDir: "dist",
   markdown: {
     remarkPlugins: [remarkGfm],
   },

@@ -1,2 +1,2 @@
 entry = "src/server.ts"
-outdir = "dist"
+outdir = "worker"
