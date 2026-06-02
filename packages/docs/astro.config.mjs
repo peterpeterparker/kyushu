@@ -1,5 +1,5 @@
 // @ts-check
-import { defineConfig, fontProviders } from "astro/config";
+import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import remarkGfm from "remark-gfm";
 
