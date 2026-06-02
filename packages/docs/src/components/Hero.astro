@@ -65,7 +65,7 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
             width: 6px;
             height: 6px;
             border-radius: 50%;
-            background: #ffdd57;
+            background: var(--sl-color-orange);
             flex-shrink: 0;
             position: relative;
         }
@@ -75,7 +75,7 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
             position: absolute;
             inset: 0;
             border-radius: 50%;
-            background: #ffdd57;
+            background: var(--sl-color-orange);
             animation: ping 1.5s ease-out infinite;
         }
 
