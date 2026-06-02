@@ -37,7 +37,11 @@
     padding: 0;
   }
 
-  :root[data-has-hero] div.page > div.main-frame div.sl-container > div {
+  :root[data-has-hero] div.page > div.main-frame div.sl-container > div.hero {
+    padding: 5rem calc(2 * var(--sl-content-pad-x)) 1.5rem;
+  }
+
+  :root[data-has-hero] div.page > div.main-frame div.sl-container > div.sl-markdown-content {
     padding: 1.5rem calc(2 * var(--sl-content-pad-x));
   }
 

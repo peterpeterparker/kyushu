@@ -17,7 +17,7 @@ const isHomepage = Astro.locals.starlightRoute.id === '';
         </div>
 
         <div class="link">
-            <LinkButton href="https://daviddalbusco.com" variant='minimal' rel="noopener noreferrer" target="_blank">Contact</LinkButton>
+            <LinkButton href="https://daviddalbusco.com" variant='minimal' rel="noopener noreferrer" target="_blank">Built by David</LinkButton>
         </div>
     </footer>
         ) : (
@@ -34,7 +34,7 @@ const isHomepage = Astro.locals.starlightRoute.id === '';
         padding: 0;
     }
 
-    .link {
+    .link:not(:last-of-type) {
         border-right: var(--layout-section-border);
     }
 
