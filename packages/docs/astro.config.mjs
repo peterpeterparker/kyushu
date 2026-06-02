@@ -58,8 +58,8 @@ export default defineConfig({
         { slug: "known-limitations" },
       ],
       components: {
-        Hero: './src/components/Hero.astro',
-      }
+        Hero: "./src/components/Hero.astro",
+      },
     }),
   ],
 });
