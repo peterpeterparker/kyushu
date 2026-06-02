@@ -27,6 +27,7 @@ export default defineConfig({
         "@fontsource-variable/nunito-sans/wght.css",
         "./src/styles/font.css",
         "./src/styles/colors.css",
+        "./src/styles/layout.css",
         "./src/styles/code.css",
         "./src/styles/search.css",
         "./src/styles/sidebar.css",
