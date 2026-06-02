@@ -24,6 +24,8 @@ export default defineConfig({
       lastUpdated: !process.env.CI,
       favicon: "/favicon.svg",
       customCss: [
+        "@fontsource-variable/nunito-sans/wght.css",
+        "./src/styles/font.css",
         "./src/styles/colors.css",
         "./src/styles/code.css",
         "./src/styles/search.css",
