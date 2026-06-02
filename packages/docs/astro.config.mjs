@@ -33,6 +33,7 @@ export default defineConfig({
         "./src/styles/sidebar.css",
         "./src/styles/nav.css",
         "./src/styles/header.css",
+        "./src/styles/button.css",
       ],
       social: [
         { icon: "github", label: "GitHub", href: "https://github.com/peterpeterparker/kyushu" },
@@ -56,6 +57,9 @@ export default defineConfig({
         },
         { slug: "known-limitations" },
       ],
+      components: {
+        Hero: "./src/components/Hero.astro",
+      },
     }),
   ],
 });

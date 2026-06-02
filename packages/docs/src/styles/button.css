@@ -1,0 +1,10 @@
+.sl-link-button.primary {
+  background-color: var(--sl-color-white);
+  color: var(--sl-color-black);
+  border-color: var(--sl-color-white);
+}
+
+.sl-link-button.primary:hover {
+  background-color: var(--sl-color-gray-1);
+  border-color: var(--sl-color-gray-1);
+}

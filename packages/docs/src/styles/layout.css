@@ -12,6 +12,7 @@
 
   :root[data-has-hero] div.page > header.header > div.header {
     max-width: var(--layout-max-width);
+    width: 100%;
     margin: 0 auto;
     border: var(--layout-section-border);
     padding: var(--sl-nav-pad-y) var(--sl-nav-pad-x);
@@ -19,6 +20,7 @@
 
   :root[data-has-hero] div.page > div.main-frame {
     max-width: var(--layout-max-width);
+    width: 100%;
     margin: 0 auto;
     border: var(--layout-section-border);
   }

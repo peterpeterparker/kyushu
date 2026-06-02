@@ -1,0 +1,93 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { LinkButton } from '@astrojs/starlight/components';
+
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+---
+
+<div class="hero not-content">
+    <div class="sl-flex stack">
+        <div class="banner">
+            <span class="banner-dot"></span>
+            <span>Early experiment — expect breaking changes.</span>
+        </div>
+
+        <h1 data-page-title set:html={title} />
+
+        {tagline && <p class="tagline" set:html={tagline} />}
+
+        <div class="install">
+            <Code code="curl -fsSL https://kyushu.dev/install | bash" lang="bash" />
+        </div>
+
+        {
+            actions.length > 0 && (
+                        <div class="sl-flex actions">
+                            {actions.map(
+                                ({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+                                        <LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+                                            {text}
+                                            {icon?.html && <Fragment set:html={icon.html} />}
+                                        </LinkButton>
+                                )
+                            )}
+                        </div>
+            )
+        }
+    </div>
+</div>
+
+<style>
+    @layer starlight.core {
+        .hero {
+            padding-block: clamp(1rem, 5vw, 3rem);
+        }
+
+        .stack {
+            flex-direction: column;
+            gap: clamp(1.5rem, calc(1.5rem + 1vw), 1.5rem);
+        }
+
+        .banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            border: 1px solid var(--sl-color-gray-5);
+            border-radius: 999px;
+            font-size: var(--sl-text-xs);
+            color: var(--sl-color-gray-2);
+            width: fit-content;
+        }
+
+        .banner-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #ffdd57;
+            flex-shrink: 0;
+        }
+
+        h1 {
+            font-size: var(--sl-text-h1);
+            line-height: var(--sl-line-height-headings);
+            font-weight: 600;
+            color: var(--sl-color-white);
+            max-width: 27ch;
+            margin: 1rem 0 0;
+        }
+
+        .tagline {
+            font-size: clamp(var(--sl-text-base), calc(0.0625rem + 2vw), var(--sl-text-xl));
+            color: var(--sl-color-gray-2);
+            max-width: 60ch;
+            line-height: 1.25;
+        }
+
+        .actions {
+            gap: 1rem;
+            margin: 1.5rem 0 0;
+        }
+    }
+</style>
