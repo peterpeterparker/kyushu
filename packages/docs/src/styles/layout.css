@@ -4,6 +4,10 @@
 }
 
 @media screen and (min-width: 1140px) {
+  :root[data-has-hero] div.page {
+    padding: var(--sl-main-pad);
+  }
+
   :root[data-has-hero] div.page > header.header {
     border: none;
     padding: 0;
@@ -23,5 +27,26 @@
     width: 100%;
     margin: 0 auto;
     border: var(--layout-section-border);
+  }
+
+  :root[data-has-hero] div.page > div.main-frame main {
+    padding: 0;
+  }
+
+  :root[data-has-hero] div.page > div.main-frame div.content-panel {
+    padding: 0;
+  }
+
+  :root[data-has-hero] div.page > div.main-frame div.sl-container > div.hero {
+    padding: 5rem calc(2 * var(--sl-content-pad-x)) 1.5rem;
+  }
+
+  :root[data-has-hero] div.page > div.main-frame div.sl-container > div.sl-markdown-content {
+    padding: 1.5rem calc(2 * var(--sl-content-pad-x));
+  }
+
+  :root[data-has-hero] div.page > div.main-frame footer {
+    border-top: var(--layout-section-border);
+    margin: 0;
   }
 }

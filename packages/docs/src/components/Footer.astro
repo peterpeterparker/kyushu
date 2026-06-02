@@ -1,0 +1,45 @@
+---
+import Default from '@astrojs/starlight/components/Footer.astro';
+import { LinkButton } from '@astrojs/starlight/components';
+
+const isHomepage = Astro.locals.starlightRoute.id === '';
+---
+
+{
+    isHomepage ? (
+    <footer>
+        <div class="link">
+            <LinkButton href="https://github.com/peterpeterparker/kyushu" variant='minimal' rel="noopener noreferrer" target="_blank">GitHub</LinkButton>
+        </div>
+
+        <div class="link">
+            <LinkButton href="/getting-started" variant='minimal'>Documentation</LinkButton>
+        </div>
+
+        <div class="link">
+            <LinkButton href="https://daviddalbusco.com" variant='minimal' rel="noopener noreferrer" target="_blank">Built by David</LinkButton>
+        </div>
+    </footer>
+        ) : (
+    <Default>
+        <slot />
+    </Default>
+        )
+}
+
+<style>
+    footer {
+        display: grid;
+        grid-template-columns: repeat(3, calc(100% / 3));
+        padding: 0;
+    }
+
+    .link:not(:last-of-type) {
+        border-right: var(--layout-section-border);
+    }
+
+    .link a {
+        display: flex;
+        justify-content: center;
+    }
+</style>
