@@ -1,0 +1,104 @@
+---
+const testimonials = [
+    { quote: "But...why?", name: "John Doe", title: "Node.js Developer, NaN years experience" },
+    { quote: "I like Docker", name: "Jane Smith", title: "Senior DevOps Engineer" },
+    { quote: "Have you heard of Bun?", name: "Bob Johnson", title: "AI prompt master chef" },
+];
+---
+
+<section class="testimonials not-content">
+    <h2>What people are saying <span class="probably">(probably)</span></h2>
+
+    <div class="grid">
+        {testimonials.map(({ quote, name, title }) => (
+                <figure>
+                    <blockquote>"{quote}"</blockquote>
+                    <figcaption>
+                        <div class="avatar">{name.split(' ').map((n: string) => n[0]).join('')}</div>
+                        <div>
+                            <p class="name">{name}</p>
+                            <p class="title">{title}</p>
+                        </div>
+                    </figcaption>
+                </figure>
+        ))}
+    </div>
+</section>
+
+<style>
+    .testimonials {
+        padding-block: clamp(2rem, 5vw, 4rem);
+        border-top: 1px solid var(--sl-color-gray-5);
+    }
+
+    .testimonials h2 {
+        color: var(--sl-color-white);
+        margin-bottom: 1rem;
+    }
+
+    .probably {
+        font-weight: 400;
+        color: var(--sl-color-gray-3);
+        font-size: var(--sl-text-lg);
+    }
+
+    .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+    }
+
+    .testimonials figure {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 1.5rem;
+        padding: 1.25rem;
+        border: 1px solid var(--sl-color-gray-5);
+        border-radius: 8px;
+        margin: 0;
+    }
+
+    .testimonials blockquote {
+        font-size: var(--sl-text-lg);
+        font-weight: 600;
+        color: var(--sl-color-white);
+        margin: 0;
+        line-height: 1.4;
+    }
+
+    .testimonials figcaption {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .avatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: var(--sl-color-gray-5);
+        color: var(--sl-color-gray-2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        font-weight: 600;
+        flex-shrink: 0;
+    }
+
+    .name {
+        font-size: var(--sl-text-sm);
+        font-weight: 600;
+        color: var(--sl-color-gray-2);
+        margin: 0;
+        line-height: 1.25;
+    }
+
+    .title {
+        font-size: var(--sl-text-xs);
+        color: var(--sl-color-gray-3);
+        margin: 0;
+        line-height: 1.25;
+    }
+</style>

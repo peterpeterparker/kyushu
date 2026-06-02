@@ -40,9 +40,13 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
 
 <style>
     @layer starlight.core {
+        .hero {
+            padding-block: clamp(1rem, 5vw, 3rem);
+        }
+
         .stack {
             flex-direction: column;
-            gap: clamp(1.5rem, calc(1.5rem + 1vw), 2rem);
+            gap: clamp(1.5rem, calc(1.5rem + 1vw), 1.5rem);
         }
 
         .banner {
@@ -50,7 +54,7 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
             align-items: center;
             gap: 8px;
             padding: 6px 14px;
-            border: 0.5px solid var(--sl-color-gray-5);
+            border: 1px solid var(--sl-color-gray-5);
             border-radius: 999px;
             font-size: var(--sl-text-xs);
             color: var(--sl-color-gray-3);
@@ -77,6 +81,13 @@ const { title = data.title, tagline, actions = [] } = data.hero || {};
         .tagline {
             font-size: clamp(var(--sl-text-base), calc(0.0625rem + 2vw), var(--sl-text-xl));
             color: var(--sl-color-gray-2);
+            max-width: 60ch;
+            line-height: 1.25;
+        }
+
+        .actions {
+            gap: 1rem;
+            margin: 1.5rem 0 0;
         }
     }
 </style>

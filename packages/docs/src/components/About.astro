@@ -4,6 +4,7 @@ import { LinkButton } from '@astrojs/starlight/components';
 
 <section class="about not-content">
     <h2>What is Kyushu?</h2>
+
     <p>Kyushu is an open source CLI that lets you write a JavaScript or TypeScript worker, build it into a self-contained WebAssembly binary, and run it anywhere with one command - <code>kyu</code>.</p>
 
     <ul>
@@ -31,13 +32,10 @@ import { LinkButton } from '@astrojs/starlight/components';
 <style>
     .about {
         padding-block: clamp(2rem, 5vw, 4rem);
-        border-top: 0.5px solid var(--sl-color-gray-5);
-        max-width: 60ch;
+        border-top: 1px solid var(--sl-color-gray-5);
     }
 
     .about h2 {
-        font-size: var(--sl-text-2xl);
-        font-weight: 600;
         color: var(--sl-color-white);
         margin-bottom: 1rem;
     }
@@ -46,6 +44,7 @@ import { LinkButton } from '@astrojs/starlight/components';
         font-size: var(--sl-text-body);
         color: var(--sl-color-gray-2);
         margin-bottom: 2rem;
+        max-width: 60ch;
     }
 
     .about ul {
