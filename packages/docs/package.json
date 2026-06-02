@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@astrojs/starlight": "^0.39.2",
+    "@fontsource-variable/nunito-sans": "^5.2.7",
     "astro": "^6.4.2",
     "file-type": "^22.0.1",
     "remark-gfm": "^4.0.1",

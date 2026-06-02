@@ -1,5 +1,5 @@
 // @ts-check
-import { defineConfig } from "astro/config";
+import { defineConfig, fontProviders } from "astro/config";
 import starlight from "@astrojs/starlight";
 import remarkGfm from "remark-gfm";
 
@@ -24,6 +24,8 @@ export default defineConfig({
       lastUpdated: !process.env.CI,
       favicon: "/favicon.svg",
       customCss: [
+        "@fontsource-variable/nunito-sans/wght.css",
+        "./src/styles/font.css",
         "./src/styles/colors.css",
         "./src/styles/code.css",
         "./src/styles/search.css",
