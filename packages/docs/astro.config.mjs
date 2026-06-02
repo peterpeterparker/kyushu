@@ -3,6 +3,9 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import remarkGfm from "remark-gfm";
 
+const title = "Kyushu";
+const description = "A self-hostable Wasm sandbox for JavaScript workers.";
+
 export default defineConfig({
   site: "https://kyushu.dev",
   output: "static",
@@ -15,7 +18,24 @@ export default defineConfig({
   },
   integrations: [
     starlight({
-      title: "Kyushu",
+      title,
+      description,
+      head: [
+        { tag: "meta", attrs: { property: "og:title", content: title } },
+        { tag: "meta", attrs: { property: "og:description", content: description } },
+        {
+          tag: "meta",
+          attrs: { property: "og:image", content: "https://kyushu.dev/social-image.jpg" },
+        },
+        { tag: "meta", attrs: { property: "og:type", content: "website" } },
+        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+        { tag: "meta", attrs: { name: "twitter:title", content: title } },
+        { tag: "meta", attrs: { name: "twitter:description", content: description } },
+        {
+          tag: "meta",
+          attrs: { name: "twitter:image", content: "https://kyushu.dev/social-image.jpg" },
+        },
+      ],
       logo: {
         light: "./src/assets/logo-light.svg",
         dark: "./src/assets/logo-dark.svg",
