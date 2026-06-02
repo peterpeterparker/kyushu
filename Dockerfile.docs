@@ -31,6 +31,8 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 
+RUN pnpm --filter kyushu-docs build
+
 RUN cd packages/docs && kyu build
 
 RUN mkdir -p /out/worker && \
