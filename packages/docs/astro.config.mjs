@@ -21,7 +21,7 @@ export default defineConfig({
         dark: "./src/assets/logo-dark.svg",
         replacesTitle: true,
       },
-      lastUpdated: !process.env.CI,
+      lastUpdated: true,
       favicon: "/favicon.svg",
       customCss: [
         "@fontsource-variable/nunito-sans/wght.css",
@@ -59,6 +59,7 @@ export default defineConfig({
       ],
       components: {
         Hero: "./src/components/Hero.astro",
+        Footer: "./src/components/Footer.astro",
       },
     }),
   ],
