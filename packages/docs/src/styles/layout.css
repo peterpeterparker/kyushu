@@ -1,0 +1,25 @@
+:root {
+  --layout-max-width: 1078px;
+  --layout-section-border: 1px solid var(--sl-color-hairline-shade);
+}
+
+@media screen and (min-width: 1140px) {
+  :root[data-has-hero] div.page > header.header {
+    border: none;
+    padding: 0;
+    height: auto;
+  }
+
+  :root[data-has-hero] div.page > header.header > div.header {
+    max-width: var(--layout-max-width);
+    margin: 0 auto;
+    border: var(--layout-section-border);
+    padding: var(--sl-nav-pad-y) var(--sl-nav-pad-x);
+  }
+
+  :root[data-has-hero] div.page > div.main-frame {
+    max-width: var(--layout-max-width);
+    margin: 0 auto;
+    border: var(--layout-section-border);
+  }
+}
