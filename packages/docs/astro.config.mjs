@@ -76,6 +76,15 @@ export default defineConfig({
           items: [{ slug: "guides/deploy" }],
         },
         { slug: "known-limitations" },
+        {
+          label: "Examples",
+          items: [
+            { slug: "examples/hello-world" },
+            { slug: "examples/fetch" },
+            { slug: "examples/file-system" },
+            { slug: "examples/env" },
+          ],
+        },
       ],
       components: {
         Hero: "./src/components/Hero.astro",
