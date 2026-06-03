@@ -87,8 +87,8 @@ export default defineConfig({
         },
       ],
       components: {
-        Hero: "./src/components/Hero.astro",
-        Footer: "./src/components/Footer.astro",
+        Hero: "./src/components/landing/Hero.astro",
+        Footer: "./src/components/landing/Footer.astro",
       },
     }),
   ],
