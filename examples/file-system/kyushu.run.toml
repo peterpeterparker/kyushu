@@ -1,0 +1,4 @@
+[[mounts]]
+host = "."
+guest = "/"
+writable = true

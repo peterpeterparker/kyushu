@@ -1,0 +1,9 @@
+{
+  "name": "kyushu-fetch",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "devDependencies": {
+    "kyushu-types": "^0.0.3"
+  }
+}

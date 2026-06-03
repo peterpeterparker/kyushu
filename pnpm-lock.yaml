@@ -220,6 +220,24 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  examples/env:
+    devDependencies:
+      kyushu-types:
+        specifier: ^0.0.3
+        version: 0.0.3
+
+  examples/fetch:
+    devDependencies:
+      kyushu-types:
+        specifier: ^0.0.3
+        version: 0.0.3
+
+  examples/file-system:
+    devDependencies:
+      kyushu-types:
+        specifier: ^0.0.3
+        version: 0.0.3
+
   examples/hello-world:
     devDependencies:
       kyushu-types:
