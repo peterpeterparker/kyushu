@@ -32,9 +32,18 @@ pub fn handle(request: IncomingRequest, response_out: ResponseOutparam) {
     ResponseOutparam::set(response_out, Ok(resp));
 
     if let Some(body) = body {
+        let bytes = body.into_bytes();
+
+        // blocking_write_and_flush perform a write of up to 4096 bytes
+        // https://github.com/WebAssembly/wasi-io/blob/main/imports.md#methodoutput-streamblocking-write-and-flush-func
+        // https://github.com/bytecodealliance/wasmtime/issues/9653
         let out = body_out.write().expect("Failed to get body write stream");
-        out.blocking_write_and_flush(&body.into_bytes())
-            .expect("Failed to write body");
+        for chunk in bytes.chunks(4096) {
+            out.blocking_write_and_flush(chunk)
+                .expect("Failed to write body");
+        }
+
+        drop(out);
     }
 
     OutgoingBody::finish(body_out, None).expect("Failed to finish body");
