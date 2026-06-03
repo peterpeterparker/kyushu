@@ -37,6 +37,7 @@ export default {
             typeof mimeType === "string"
               ? mimeType
               : (CUSTOM_MIME_TYPES[sanitizedPathname] ?? "application/octet-stream"),
+          "content-length": `${file.byteLength}`,
         },
         body: file,
       };
