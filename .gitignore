@@ -19,3 +19,7 @@ worker
 
 # Node
 node_modules
+
+# Mac OSX temporary files
+.DS_Store
+**/.DS_Store
