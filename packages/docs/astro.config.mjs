@@ -83,6 +83,7 @@ export default defineConfig({
             { slug: "examples/fetch" },
             { slug: "examples/file-system" },
             { slug: "examples/env" },
+            { slug: "examples/static-file-server" },
           ],
         },
       ],
