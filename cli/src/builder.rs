@@ -34,9 +34,9 @@ pub async fn build(config: &BuildConfig) -> Result<()> {
 }
 
 async fn bundle_js(config: &BuildConfig) -> Result<()> {
-    let entry = &config.entry;
-    let outdir = &config.outdir;
-    let worker_wasm = format!("{}/__kyushu_worker.wasm", outdir);
+    let entry = config.entry();
+    let outdir = config.outdir();
+    let worker_wasm = config.worker_wasm();
 
     std::fs::create_dir_all(outdir)?;
 

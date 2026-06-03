@@ -9,6 +9,10 @@ div.expressive-code figure > pre {
   background: inherit;
 }
 
-div.expressive-code figure > figcaption::before {
+div.expressive-code figure > figcaption:has(> span.title:empty)::before {
   background: #a0a0a0;
+}
+
+div.expressive-code figure > figcaption:has(> span.title:not(.empty))::before {
+  border-bottom: 1px solid var(--sl-color-hairline-shade);
 }

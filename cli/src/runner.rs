@@ -17,8 +17,9 @@ use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 pub async fn run(config: RunnerConfig) -> Result<()> {
-    let wasm_path = &config.worker.wasm;
-    let port = config.worker.port.unwrap_or(5987);
+    let worker = config.worker.clone().unwrap_or_default();
+    let wasm_path = worker.wasm();
+    let port = worker.port();
 
     println!("Loading {}...", wasm_path);
 

@@ -14,19 +14,31 @@ mod worker;
 enum Cli {
     /// Run a Wasm module and serve it over HTTP
     Run {
-        #[arg(default_value = "kyushu.run.toml")]
-        config: String,
+        #[arg()]
+        config: Option<String>,
     },
     /// Build the worker Wasm from JS/TS source
     Build {
-        #[arg(default_value = "kyushu.build.toml")]
-        config: String,
+        #[arg()]
+        config: Option<String>,
     },
 }
 
-fn read_config<T: for<'de> serde::Deserialize<'de>>(config_path: &str) -> Result<T> {
-    let contents = std::fs::read_to_string(config_path)
-        .map_err(|_| anyhow::anyhow!("Config file not found: {}", config_path))?;
+fn read_config<T: for<'de> serde::Deserialize<'de> + Default>(config_path: Option<&str>) -> Result<T> {
+    let Some(config_path) = config_path else {
+        return Ok(T::default());
+    };
+
+    if !std::path::Path::new(config_path).exists() {
+        return Ok(T::default());
+    }
+
+    let contents = std::fs::read_to_string(config_path)?;
+    if contents.trim().is_empty() {
+        eprintln!("Warning: {} is empty, using defaults.", config_path);
+        return Ok(T::default());
+    }
+
     Ok(toml::from_str(&contents)?)
 }
 
@@ -38,12 +50,12 @@ async fn main() -> Result<()> {
         Cli::Run {
             config: config_path,
         } => {
-            runner::run(read_config(&config_path)?).await?;
+            runner::run(read_config(config_path.as_deref())?).await?;
         }
         Cli::Build {
             config: config_path,
         } => {
-            builder::build(&read_config(&config_path)?).await?;
+            builder::build(&read_config(config_path.as_deref())?).await?;
         }
     }
 
