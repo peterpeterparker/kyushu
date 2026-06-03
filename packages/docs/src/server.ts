@@ -4,6 +4,7 @@ import { join } from "node:path";
 import mime from "mime-types";
 import { Buffer } from "node:buffer";
 import { Stats } from "node:fs";
+import { createHash } from "node:crypto";
 
 type Result<T> = { status: "success"; result: T } | { status: "error"; err: unknown };
 
@@ -89,54 +90,130 @@ const resolveCompressedFilepath = async ({
   return null;
 };
 
+interface CachedResponse {
+  body: Buffer<ArrayBuffer>;
+  headers: CachedResponseHeaders;
+}
+
+interface CachedResponseHeaders {
+  "content-type": string;
+  "content-length": string;
+  "last-modified": string;
+  "content-encoding"?: "br";
+  etag: string;
+}
+
+class ResponsePath {
+  #requestedPath: string;
+  #filepath: string;
+  #compressedFilepath: string | null;
+  #effectivePath: string;
+
+  constructor({
+    pathname,
+    filepath,
+    compressedFilepath,
+  }: {
+    filepath: string;
+    compressedFilepath: string | null;
+  } & Pick<URL, "pathname">) {
+    this.#requestedPath = pathname;
+    this.#filepath = filepath;
+    this.#compressedFilepath = compressedFilepath;
+    this.#effectivePath = compressedFilepath ?? filepath;
+  }
+
+  get requestPath(): string {
+    return this.#requestedPath;
+  }
+
+  get filepath(): string {
+    return this.#filepath;
+  }
+
+  get compressedFilepath(): string | null {
+    return this.#compressedFilepath;
+  }
+
+  get effectivePath(): string {
+    return this.#effectivePath;
+  }
+}
+
+class CachedResponses {
+  #cache: Map<string, CachedResponse> = new Map();
+
+  async getOrBuild(args: { path: ResponsePath }): Promise<CachedResponse> {
+    return this.#get(args) ?? (await this.#buildAndCache(args));
+  }
+
+  #get({ path }: { path: ResponsePath }): CachedResponse | undefined {
+    return this.#cache.get(path.effectivePath);
+  }
+
+  async #buildAndCache({ path }: { path: ResponsePath }) {
+    type BodyResponse = Pick<CachedResponse, "body"> & Pick<Stats, "size" | "mtime">;
+
+    const buildBody = async (): Promise<BodyResponse> => {
+      const [file, stats] = await Promise.all([
+        readFile(path.effectivePath),
+        stat(path.effectivePath),
+      ] as const);
+
+      return {
+        body: file,
+        ...stats,
+      };
+    };
+
+    const { body, size: byteLength, mtime: lastModified } = await buildBody();
+
+    const mimeType = mime.lookup(path.filepath);
+
+    const response: CachedResponse = {
+      body,
+      headers: {
+        "content-type":
+          typeof mimeType === "string"
+            ? mimeType
+            : (CUSTOM_MIME_TYPES[path.requestPath] ?? "application/octet-stream"),
+        "content-length": `${byteLength}`,
+        "last-modified": lastModified.toUTCString(),
+        ...(path.compressedFilepath !== null && {
+          "content-encoding": "br",
+        }),
+        etag: `"${createHash("md5").update(body).digest("hex")}"`,
+      },
+    };
+
+    this.#cache.set(path.effectivePath, response);
+
+    return response;
+  }
+}
+
+const cachedResponses = new CachedResponses();
+
 const buildResponse = async ({
-  filepath,
-  compressedFilepath,
-  pathname,
   method,
+  ...rest
 }: {
   filepath: string;
   compressedFilepath: string | null;
   method: Extract<WorkerMethod, "GET" | "HEAD">;
 } & Pick<URL, "pathname">): Promise<WorkerResponse> => {
-  const effectivePath = compressedFilepath ?? filepath;
+  const path = new ResponsePath(rest);
 
-  type BodyResponse = {
-    body: Buffer<ArrayBuffer> | null;
-  } & Pick<Stats, "size" | "mtime">;
-
-  const buildBody = async (): Promise<BodyResponse> => {
-    const [file, stats] = await Promise.all([
-      method === "HEAD" ? Promise.resolve(null) : readFile(effectivePath),
-      stat(effectivePath),
-    ] as const);
-
-    return {
-      body: file,
-      ...stats,
-    };
-  };
-
-  const { body, size: byteLength, mtime: lastModified } = await buildBody();
-
-  const mimeType = mime.lookup(filepath);
+  const { body, headers } = await cachedResponses.getOrBuild({ path });
 
   return {
     status: 200,
     headers: {
       ...SECURITY_HEADERS,
-      "content-type":
-        typeof mimeType === "string"
-          ? mimeType
-          : (CUSTOM_MIME_TYPES[pathname] ?? "application/octet-stream"),
-      "content-length": `${byteLength}`,
-      "last-modified": lastModified.toUTCString(),
       vary: "Accept-Encoding",
-      ...(compressedFilepath !== null && {
-        "content-encoding": "br",
-      }),
+      ...headers,
     },
-    ...(body !== null && { body }),
+    ...(method === "GET" && { body }),
   };
 };
 
