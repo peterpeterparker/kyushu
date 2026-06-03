@@ -1,0 +1,43 @@
+---
+title: File System
+description: Read and write files from a worker.
+---
+
+Read and write files by mounting a host directory into the sandbox.
+
+```typescript title="src/index.ts"
+import type { ExportedHandler } from "kyushu-types";
+import { writeFileSync, readFileSync } from "node:fs";
+
+export default {
+  async fetch() {
+    writeFileSync("/data/hello.txt", "Hello from Kyushu!");
+    const content = readFileSync("/data/hello.txt", "utf8");
+
+    return {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+      body: content,
+    };
+  },
+} satisfies ExportedHandler;
+```
+
+## Config
+
+By default, the sandbox has no access to the host filesystem. Mount a directory to expose it to your worker.
+
+```toml title="kyushu.run.toml"
+[[mounts]]
+host = "."
+guest = "/"
+writable = true
+```
+
+:::note
+Set `writable = true` to allow the worker to write files. Mounts are read-only by default.
+:::
+
+import TryIt from "../../../components/docs/try-it-with-config.mdx";
+
+<TryIt config="kyushu.run.toml" />
