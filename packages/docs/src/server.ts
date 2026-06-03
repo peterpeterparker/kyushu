@@ -1,7 +1,8 @@
-import type { ExportedHandler, WorkerRequest, WorkerResponse } from "kyushu-types";
+import type { ExportedHandler, WorkerMethod, WorkerRequest, WorkerResponse } from "kyushu-types";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import mime from "mime-types";
+import { Buffer } from "node:buffer";
 
 type Result<T> = { status: "success"; result: T } | { status: "error"; err: unknown };
 
@@ -81,11 +82,39 @@ const buildResponse = async ({
   filepath,
   compressedFilepath,
   pathname,
-}: { filepath: string; compressedFilepath: string | null } & Pick<
-  URL,
-  "pathname"
->): Promise<WorkerResponse> => {
-  const file = await readFile(compressedFilepath ?? filepath);
+  method,
+}: {
+  filepath: string;
+  compressedFilepath: string | null;
+  method: Extract<WorkerMethod, "GET" | "HEAD">;
+} & Pick<URL, "pathname">): Promise<WorkerResponse> => {
+  const effectivePath = compressedFilepath ?? filepath;
+
+  interface BodyResponse {
+    body: Buffer<ArrayBuffer> | null;
+    byteLength: number;
+  }
+
+  const buildGet = async (): Promise<BodyResponse> => {
+    const file = await readFile(effectivePath);
+    return {
+      body: file,
+      byteLength: file.byteLength,
+    };
+  };
+
+  const buildHead = async (): Promise<BodyResponse> => {
+    const stats = await stat(effectivePath);
+
+    return {
+      body: null,
+      byteLength: stats.size,
+    };
+  };
+
+  const fn = method === "HEAD" ? buildHead : buildGet;
+  const { body, byteLength } = await fn();
+
   const mimeType = mime.lookup(filepath);
 
   return {
@@ -95,18 +124,22 @@ const buildResponse = async ({
         typeof mimeType === "string"
           ? mimeType
           : (CUSTOM_MIME_TYPES[pathname] ?? "application/octet-stream"),
-      "content-length": `${file.byteLength}`,
+      "content-length": `${byteLength}`,
       vary: "Accept-Encoding",
       ...(compressedFilepath !== null && {
         "content-encoding": "br",
       }),
     },
-    body: file,
+    ...(body !== null && { body }),
   };
 };
 
 export default {
-  async fetch({ url: requestUrl, headers }) {
+  async fetch({ url: requestUrl, headers, method }) {
+    if (method !== "GET" && method !== "HEAD") {
+      return { status: 405, body: "Method Not Allowed" };
+    }
+
     const url = URL.parse(requestUrl);
 
     if (url === null) {
@@ -140,7 +173,7 @@ export default {
     const { result: compressedFilepath } = compressedFilepathResult;
 
     const responseResult = await safeExec(
-      async () => await buildResponse({ filepath, compressedFilepath, pathname }),
+      async () => await buildResponse({ filepath, compressedFilepath, pathname, method }),
     );
 
     if (responseResult.status === "error") {
