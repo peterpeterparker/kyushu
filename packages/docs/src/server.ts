@@ -19,6 +19,16 @@ const CUSTOM_MIME_TYPES: Record<string, string> = {
   "/install": "text/x-shellscript",
 };
 
+// List of recommended security headers as per https://owasp.org/www-satellite-secure-headers/
+// These headers enable browser security features (like limit access to platform apis and set
+// iFrame policies, etc.).
+const SECURITY_HEADERS: WorkerResponse["headers"] = {
+  "X-Content-Type-Options": "nosniff",
+  "Strict-Transport-Security": "max-age=31536000 ; includeSubDomains",
+  "Referrer-Policy": "no-referrer",
+  "X-Frame-Options": "DENY",
+};
+
 const aliasesOf = ({ pathname }: Pick<URL, "pathname">): [string, ...string[]] | undefined => {
   if (pathname.endsWith("/")) {
     return [`${pathname}index.html`];
@@ -120,6 +130,7 @@ const buildResponse = async ({
   return {
     status: 200,
     headers: {
+      ...SECURITY_HEADERS,
       "content-type":
         typeof mimeType === "string"
           ? mimeType
