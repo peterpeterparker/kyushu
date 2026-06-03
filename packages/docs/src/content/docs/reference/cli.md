@@ -11,7 +11,7 @@ Bundle and pre-initialize a worker.
 kyu build [config]
 ```
 
-If no config path is provided, the CLI looks for `kyushu.build.toml` in the current directory. Pass an explicit path to override.
+If no config path is provided, defaults are used. Pass an explicit path to override.
 
 ```bash
 kyu build
@@ -26,7 +26,7 @@ Run a built worker.
 kyu run [config]
 ```
 
-If no config path is provided, the CLI looks for `kyushu.run.toml` in the current directory. Pass an explicit path to override.
+If no config path is provided, defaults are used. Pass an explicit path to override.
 
 ```bash
 kyu run

@@ -27,7 +27,7 @@ Or download a pre-built binary from the [releases page](https://github.com/peter
 `kyu` has two commands: `build` to compile your worker, and `run` to serve it. You can install it on your local machine for development, on a VPS to serve traffic, or both.
 :::
 
-## Your first worker
+## Quick start
 
 The following steps take you from a blank TypeScript file to a running HTTP handler.
 
@@ -51,16 +51,7 @@ The following steps take you from a blank TypeScript file to a running HTTP hand
    } satisfies ExportedHandler;
    ```
 
-2. **Create a build config**
-
-   Create `kyushu.build.toml` at the root of your project:
-
-   ```toml
-   entry = "src/index.ts"
-   outdir = "dist"
-   ```
-
-3. **Build the worker**
+2. **Build the worker**
 
    Run this on your development machine. It bundles your code and produces a self-contained `.wasm` file.
 
@@ -68,27 +59,9 @@ The following steps take you from a blank TypeScript file to a running HTTP hand
    kyu build
    ```
 
-   You should see `dist/__kyushu_worker.wasm` appear.
+   You should see `worker/__kyushu_worker.wasm` appear.
 
-4. **Create a run config**
-
-   Create `kyushu.run.toml`. This tells `kyu run` where the worker is, what port to listen on, and what the sandbox has access to.
-
-   ```toml
-   [worker]
-   wasm = "dist/__kyushu_worker.wasm"
-   port = 5987
-
-   [[mounts]]
-   host = "."
-   guest = "/"
-
-   [[env]]
-   key = "API_KEY"
-   value = "secret"
-   ```
-
-5. **Run the worker**
+3. **Run the worker**
 
    Run this wherever you want to serve requests.
 

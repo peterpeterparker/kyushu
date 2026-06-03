@@ -1,46 +1,47 @@
 ---
 title: Configuration
-description: Reference for kyushu.build.toml and kyushu.run.toml.
+description: Reference for kyu build and kyu run configuration.
 ---
 
-Kyushu uses two separate config files: one for building workers and one for running them.
+Kyushu works out of the box. Each command uses defaults but supports its own optional config file to override them.
 
-Commonly you use the build config on your local machine and in CI, while the run config lives where you serve your worker.
+The build config typically lives on your local machine and in CI, while the run config lives where you serve your worker.
 
-## kyushu.build.toml
+## Build
 
 Controls how `kyu build` bundles and pre-initializes your worker.
 
-| Field    | Type   | Description                                       |
-| -------- | ------ | ------------------------------------------------- |
-| `entry`  | string | Path to your TypeScript or JavaScript entry point |
-| `outdir` | string | Output directory for the built worker             |
+| Field     | Type   | Default                | Description                                       |
+| --------- | ------ | ---------------------- | ------------------------------------------------- |
+| `entry`   | string | `src/index.ts`         | Path to your TypeScript or JavaScript entry point |
+| `outdir`  | string | `worker`               | Output directory for the built worker             |
+| `outfile` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
 
-```toml
-entry = "src/index.ts"
+```toml title="kyushu.build.toml"
+entry = "src/server.ts"
 outdir = "dist"
 ```
 
-## kyushu.run.toml
+## Run
 
 Controls how `kyu run` loads and serves your worker.
 
-| Field               | Type   | Description                                           |
-| ------------------- | ------ | ----------------------------------------------------- |
-| `worker.wasm`       | string | Path to the built worker `.wasm` file                 |
-| `worker.port`       | number | Port to listen on (default: `5987`)                   |
-| `mounts`            | array  | Filesystem mounts to expose to the worker             |
-| `mounts[].host`     | string | Path on the host filesystem                           |
-| `mounts[].guest`    | string | Path inside the worker sandbox                        |
-| `mounts[].writable` | bool   | Whether the mount is writable (defaults to read-only) |
-| `env`               | array  | Environment variables to expose to the worker         |
-| `env[].key`         | string | Environment variable name                             |
-| `env[].value`       | string | Environment variable value                            |
+| Field               | Type   | Default                       | Description                                           |
+| ------------------- | ------ | ----------------------------- | ----------------------------------------------------- |
+| `worker.wasm`       | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file                 |
+| `worker.port`       | number | `5987`                        | Port to listen on                                     |
+| `mounts`            | array  | —                             | Filesystem mounts to expose to the worker             |
+| `mounts[].host`     | string | —                             | Path on the host filesystem                           |
+| `mounts[].guest`    | string | —                             | Path inside the worker sandbox                        |
+| `mounts[].writable` | bool   | `false`                       | Whether the mount is writable (defaults to read-only) |
+| `env`               | array  | —                             | Environment variables to expose to the worker         |
+| `env[].key`         | string | —                             | Environment variable name                             |
+| `env[].value`       | string | —                             | Environment variable value                            |
 
-```toml
+```toml title="kyushu.run.toml"
 [worker]
-wasm = "dist/__kyushu_worker.wasm"
-port = 5987
+wasm = "build/__custom_kyushu_worker.wasm"
+port = 8080
 
 [[mounts]]
 host = "./public"

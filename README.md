@@ -68,41 +68,15 @@ export default {
 } satisfies ExportedHandler;
 ```
 
-**2. Create a build config**
-
-```toml
-# kyushu.build.toml
-entry = "src/index.ts"
-outdir = "dist"
-```
-
-**3. Build**
+**2. Build**
 
 ```bash
 kyu build
 ```
 
-This produces `dist/__kyushu_worker.wasm`.
+This produces `worker/__kyushu_worker.wasm`.
 
-**4. Create a run config**
-
-```toml
-# kyushu.run.toml
-[worker]
-wasm = "dist/__kyushu_worker.wasm"
-port = 5987
-
-[[mounts]]
-host = "."
-guest = "/"
-writable = true
-
-[[env]]
-key = "API_KEY"
-value = "secret"
-```
-
-**5. Run**
+**3. Run**
 
 ```bash
 kyu run
@@ -116,29 +90,6 @@ Install the types package for autocompletion:
 ```bash
 npm install --save-dev kyushu-types
 ```
-
-## Config reference
-
-### `kyushu.build.toml` - build config
-
-| Field    | Type   | Description                                       |
-| -------- | ------ | ------------------------------------------------- |
-| `entry`  | string | Path to your TypeScript or JavaScript entry point |
-| `outdir` | string | Output directory for the built worker             |
-
-### `kyushu.run.toml` - run config
-
-| Field               | Type   | Description                                         |
-| ------------------- | ------ | --------------------------------------------------- |
-| `worker.wasm`       | string | Path to the built worker `.wasm` file               |
-| `worker.port`       | number | Port to listen on (default: `5987`)                 |
-| `mounts`            | array  | Filesystem mounts to expose to the worker           |
-| `mounts[].host`     | string | Path on the host filesystem                         |
-| `mounts[].guest`    | string | Path inside the worker sandbox                      |
-| `mounts[].writable` | bool   | Whether the mount is writable (default to readonly) |
-| `env`               | array  | Environment variables to expose to the worker       |
-| `env[].key`         | string | Environment variable name                           |
-| `env[].value`       | string | Environment variable value                          |
 
 ## API
 
@@ -172,19 +123,72 @@ export default {
 ## CLI reference
 
 ```
-kyu build <config>   Bundle and pre-initialize a worker
-kyu run <config>     Run a built worker
+kyu build [config]   Bundle and pre-initialize a worker
+kyu run [config]     Run a built worker
 kyu --version        Print the CLI version
 ```
 
-If no config is provided, `kyu build` looks for `kyushu.build.toml` and kyu run looks for `kyushu.run.toml`. Pass an explicit path to override.
+Both `build` and `run` accept an optional config file. Pass a path to override the defaults.
+
+## Config reference
+
+The available options and their defaults:
+
+### Build
+
+Configure the build step.
+
+```toml
+# kyushu.build.toml
+entry = "src/index.ts"       # default
+outdir = "worker"            # default
+outfile = "__kyushu_worker.wasm"  # default
+```
+
+| Field     | Type   | Default                | Description                                       |
+| --------- | ------ | ---------------------- | ------------------------------------------------- |
+| `entry`   | string | `src/index.ts`         | Path to your TypeScript or JavaScript entry point |
+| `outdir`  | string | `worker`               | Output directory for the built worker             |
+| `outfile` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
+
+### Run
+
+Configure the runner.
+
+```toml
+# kyushu.run.toml
+[worker]
+wasm = "worker/__kyushu_worker.wasm"  # default
+port = 5987                           # default
+
+[[mounts]]
+host = "."
+guest = "/"
+writable = true
+
+[[env]]
+key = "API_KEY"
+value = "secret"
+```
+
+| Field               | Type   | Default                       | Description                                         |
+| ------------------- | ------ | ----------------------------- | --------------------------------------------------- |
+| `worker.wasm`       | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file               |
+| `worker.port`       | number | `5987`                        | Port to listen on                                   |
+| `mounts`            | array  | —                             | Filesystem mounts to expose to the worker           |
+| `mounts[].host`     | string | —                             | Path on the host filesystem                         |
+| `mounts[].guest`    | string | —                             | Path inside the worker sandbox                      |
+| `mounts[].writable` | bool   | `false`                       | Whether the mount is writable (default to readonly) |
+| `env`               | array  | —                             | Environment variables to expose to the worker       |
+| `env[].key`         | string | —                             | Environment variable name                           |
+| `env[].value`       | string | —                             | Environment variable value                          |
 
 ## Security
 
 > [!CAUTION]
 > Kyushu's sandbox is only as strong as its dependencies. Please read this before deploying anything sensitive.
 
-Your JavaScript runs inside a [Wasmtime](https://wasmtime.io) WebAssembly sandbox, which provides strong isolation from the host system. Access to the filesystem and environment variables is gated by explicit configuration in `kyushu.run.toml`.
+Your JavaScript runs inside a [Wasmtime](https://wasmtime.io) WebAssembly sandbox, which provides strong isolation from the host system. Access to the filesystem and environment variables is gated by explicit configuration in the run config.
 
 However, there are important caveats:
 
