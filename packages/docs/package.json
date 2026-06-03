@@ -16,7 +16,8 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "astro build && pnpm build:compress",
+    "build:compress": "node build.compress.ts",
     "preview": "astro preview",
     "astro": "astro"
   },

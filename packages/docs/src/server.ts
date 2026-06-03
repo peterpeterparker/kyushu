@@ -1,4 +1,4 @@
-import type { ExportedHandler, WorkerResponse } from "kyushu-types";
+import type { ExportedHandler, WorkerRequest, WorkerResponse } from "kyushu-types";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import mime from "mime-types";
@@ -60,11 +60,32 @@ const resolveFilepath = async ({ pathname }: Pick<URL, "pathname">): Promise<str
   return null;
 };
 
+const resolveCompressedFilepath = async ({
+  filepath,
+  headers,
+}: { filepath: string } & Pick<WorkerRequest, "headers">): Promise<string | null> => {
+  if (headers?.["accept-encoding"]?.includes("br") !== true) {
+    return null;
+  }
+
+  const compressedFilepath = `${filepath}.br`;
+
+  if (await fileExists({ filepath: compressedFilepath })) {
+    return compressedFilepath;
+  }
+
+  return null;
+};
+
 const buildResponse = async ({
   filepath,
+  compressedFilepath,
   pathname,
-}: { filepath: string } & Pick<URL, "pathname">): Promise<WorkerResponse> => {
-  const file = await readFile(filepath);
+}: { filepath: string; compressedFilepath: string | null } & Pick<
+  URL,
+  "pathname"
+>): Promise<WorkerResponse> => {
+  const file = await readFile(compressedFilepath ?? filepath);
   const mimeType = mime.lookup(filepath);
 
   return {
@@ -75,13 +96,17 @@ const buildResponse = async ({
           ? mimeType
           : (CUSTOM_MIME_TYPES[pathname] ?? "application/octet-stream"),
       "content-length": `${file.byteLength}`,
+      vary: "Accept-Encoding",
+      ...(compressedFilepath !== null && {
+        "content-encoding": "br",
+      }),
     },
     body: file,
   };
 };
 
 export default {
-  async fetch({ url: requestUrl }) {
+  async fetch({ url: requestUrl, headers }) {
     const url = URL.parse(requestUrl);
 
     if (url === null) {
@@ -103,7 +128,20 @@ export default {
       return { status: 404, body: "Not Found" };
     }
 
-    const responseResult = await safeExec(async () => await buildResponse({ filepath, pathname }));
+    const compressedFilepathResult = await safeExec(
+      async () => await resolveCompressedFilepath({ filepath, headers }),
+    );
+
+    if (compressedFilepathResult.status === "error") {
+      console.error(compressedFilepathResult.err);
+      return { status: 500, body: "Internal Server Error" };
+    }
+
+    const { result: compressedFilepath } = compressedFilepathResult;
+
+    const responseResult = await safeExec(
+      async () => await buildResponse({ filepath, compressedFilepath, pathname }),
+    );
 
     if (responseResult.status === "error") {
       console.error(responseResult.err);
