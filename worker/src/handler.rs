@@ -118,21 +118,33 @@ async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
         ctx.globals().set("jsArgs", js_req).map_err(|e| e.to_string())?;
 
         let promise = Module::evaluate(ctx.clone(), "@kyushu/handler", r#"
-            import app from "@kyushu/app";
             import { ExportedHandlerSchema, WorkerRequestSchema, WorkerResponseSchema } from "@kyushu/types";
 
-            const handler = ExportedHandlerSchema.parse(app);
-            const req = WorkerRequestSchema.parse(jsArgs);
+            try {
+                // The developer bundle is loaded once as globalThis.userModule at Wizer time.
+                const app = globalThis.userModule.default;
 
-            const response = await handler.fetch(req);
+                const handler = ExportedHandlerSchema.parse(app);
+                const req = WorkerRequestSchema.parse(jsArgs);
 
-            const resp = WorkerResponseSchema.parse(response);
+                const response = await handler.fetch(req);
 
-            globalThis.jsResult = {
-                status: resp.status ?? 200,
-                body: resp.body ?? null,
-                headers: resp.headers ?? {}
-            };
+                const resp = WorkerResponseSchema.parse(response);
+
+                globalThis.jsResult = {
+                    status: resp.status ?? 200,
+                    body: resp.body ?? null,
+                    headers: resp.headers ?? {}
+                };
+            } catch (err) {
+                console.log(err);
+
+                globalThis.jsResult = {
+                    status: 500,
+                    body: "Internal Server Error",
+                    headers: {}
+                };
+            }
         "#)
             .catch(&ctx)
             .map_err(|e| e.to_string())?;

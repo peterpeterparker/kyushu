@@ -12,7 +12,7 @@ const TYPES_BUNDLE: &str = include_str!("../../packages/types/dist/index.mjs");
 
 impl bindings::Guest for Worker {
     fn wizer_initialize() {
-        // Register @kyushu/types and @kyushu/app as builtin modules before wizer_initialize()
+        // Register @kyushu/types as builtin modules before wizer_initialize()
         // so they are wired into the QuickJS resolver and loader alongside the polyfill's
         // own modules, making them importable from the worker's fetch handler.
         kyushu_runtime::add_additional_module(
@@ -20,8 +20,15 @@ impl bindings::Guest for Worker {
             Box::new(|| TYPES_BUNDLE.to_string()),
         );
 
+        eprintln!("WHAT?");
+
+        // Register the developer bundle as the export module before wizer_initialize().
+        // The bundle is loaded as globalThis.userModule at Wizer time, meaning the module
+        // is evaluated once and its state persists across requests. This allows declaring
+        // module-level variables (e.g. a response cache) that survive between requests,
+        // rather than re-importing the bundle on every request.
         let bundle = bindings::kyushu::worker::bundle::get_bundle();
-        kyushu_runtime::add_additional_module("@kyushu/app", Box::new(move || bundle.clone()));
+        kyushu_runtime::set_export_module(Box::new(move || bundle.clone()));
 
         // Must be called after registering modules and before the first request is served.
         //
