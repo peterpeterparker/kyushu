@@ -24,7 +24,9 @@ enum Cli {
     },
 }
 
-fn read_config<T: for<'de> serde::Deserialize<'de> + Default>(config_path: Option<&str>) -> Result<T> {
+fn read_config<T: for<'de> serde::Deserialize<'de> + Default>(
+    config_path: Option<&str>,
+) -> Result<T> {
     let Some(config_path) = config_path else {
         return Ok(T::default());
     };
