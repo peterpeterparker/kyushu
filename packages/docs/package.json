@@ -24,11 +24,12 @@
     "@astrojs/starlight": "^0.39.2",
     "@fontsource-variable/nunito-sans": "^5.2.7",
     "astro": "^6.4.2",
-    "file-type": "^22.0.1",
+    "mime-types": "^3.0.2",
     "remark-gfm": "^4.0.1",
     "sharp": "^0.34.5"
   },
   "devDependencies": {
+    "@types/mime-types": "^3.0.1",
     "kyushu-types": "^0.0.3"
   }
 }

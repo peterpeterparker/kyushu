@@ -1,7 +1,7 @@
 import type { ExportedHandler } from "kyushu-types";
 import { readFile, access } from "node:fs/promises";
 import { join } from "node:path";
-import { fileTypeFromBuffer } from "file-type";
+import mime from "mime-types";
 
 const CUSTOM_MIME_TYPES: Record<string, string> = {
   "/install": "text/x-shellscript",
@@ -28,13 +28,15 @@ export default {
 
     try {
       const file = await readFile(filepath);
-      const fileType = await fileTypeFromBuffer(file);
+      const mimeType = mime.lookup(filepath);
 
       return {
         status: 200,
         headers: {
           "content-type":
-            fileType?.mime ?? CUSTOM_MIME_TYPES[sanitizedPathname] ?? "application/octet-stream",
+            typeof mimeType === "string"
+              ? mimeType
+              : (CUSTOM_MIME_TYPES[sanitizedPathname] ?? "application/octet-stream"),
         },
         body: file,
       };
