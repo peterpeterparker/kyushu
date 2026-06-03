@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import mime from "mime-types";
 import { Buffer } from "node:buffer";
+import { Stats } from "node:fs";
 
 type Result<T> = { status: "success"; result: T } | { status: "error"; err: unknown };
 
@@ -100,30 +101,23 @@ const buildResponse = async ({
 } & Pick<URL, "pathname">): Promise<WorkerResponse> => {
   const effectivePath = compressedFilepath ?? filepath;
 
-  interface BodyResponse {
+  type BodyResponse = {
     body: Buffer<ArrayBuffer> | null;
-    byteLength: number;
-  }
+  } & Pick<Stats, "size" | "mtime">;
 
-  const buildGet = async (): Promise<BodyResponse> => {
-    const file = await readFile(effectivePath);
+  const buildBody = async (): Promise<BodyResponse> => {
+    const [file, stats] = await Promise.all([
+      method === "HEAD" ? Promise.resolve(null) : readFile(effectivePath),
+      stat(effectivePath),
+    ] as const);
+
     return {
       body: file,
-      byteLength: file.byteLength,
+      ...stats,
     };
   };
 
-  const buildHead = async (): Promise<BodyResponse> => {
-    const stats = await stat(effectivePath);
-
-    return {
-      body: null,
-      byteLength: stats.size,
-    };
-  };
-
-  const fn = method === "HEAD" ? buildHead : buildGet;
-  const { body, byteLength } = await fn();
+  const { body, size: byteLength, mtime: lastModified } = await buildBody();
 
   const mimeType = mime.lookup(filepath);
 
@@ -136,6 +130,7 @@ const buildResponse = async ({
           ? mimeType
           : (CUSTOM_MIME_TYPES[pathname] ?? "application/octet-stream"),
       "content-length": `${byteLength}`,
+      "last-modified": lastModified.toUTCString(),
       vary: "Accept-Encoding",
       ...(compressedFilepath !== null && {
         "content-encoding": "br",
