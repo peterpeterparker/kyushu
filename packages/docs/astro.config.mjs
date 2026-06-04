@@ -79,6 +79,7 @@ export default defineConfig({
           items: [{ slug: "guides/deploy" }],
         },
         { slug: "known-limitations" },
+        { slug: "security" },
         {
           label: "Examples",
           items: [
