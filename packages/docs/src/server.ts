@@ -32,10 +32,10 @@ const SECURITY_HEADERS: WorkerResponse["headers"] = {
 };
 
 const CACHE_HEADERS: Record<string, [string, ...string[]]> = {
-  ".svg": ["max-age=2592000", "public"],
-  ".css": ["max-age=2592000", "public", "immutable"],
-  ".js": ["max-age=2592000", "public", "immutable"],
-  ".woff2": ["max-age=31536000", "public", "immutable"],
+  ".svg": ["public", "max-age=2592000"],
+  ".css": ["public", "max-age=2592000", "immutable"],
+  ".js": ["public", "max-age=2592000", "immutable"],
+  ".woff2": ["public", "max-age=31536000", "immutable"],
 };
 
 const aliasesOf = ({ pathname }: Pick<URL, "pathname">): [string, ...string[]] | undefined => {
