@@ -1,6 +1,6 @@
 import type { ExportedHandler, WorkerMethod, WorkerRequest, WorkerResponse } from "kyushu-types";
 import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, extname } from "node:path";
 import mime from "mime-types";
 import { Buffer } from "node:buffer";
 import { Stats } from "node:fs";
@@ -29,6 +29,13 @@ const SECURITY_HEADERS: WorkerResponse["headers"] = {
   "Strict-Transport-Security": "max-age=31536000 ; includeSubDomains",
   "Referrer-Policy": "no-referrer",
   "X-Frame-Options": "DENY",
+};
+
+const CACHE_HEADERS: Record<string, [string, ...string[]]> = {
+  ".svg": ["public", "max-age=2592000"],
+  ".css": ["public", "max-age=2592000", "immutable"],
+  ".js": ["public", "max-age=2592000", "immutable"],
+  ".woff2": ["public", "max-age=31536000", "immutable"],
 };
 
 const aliasesOf = ({ pathname }: Pick<URL, "pathname">): [string, ...string[]] | undefined => {
@@ -126,11 +133,14 @@ const buildResponse = async ({
 
   const etag = `"${createHash("md5").update(body).digest("hex")}"`;
 
+  const cache = CACHE_HEADERS[extname(filepath)];
+
   const headers: WorkerResponse["headers"] = {
     ...SECURITY_HEADERS,
     "last-modified": lastModified.toUTCString(),
     etag,
     vary: "Accept-Encoding",
+    ...(cache !== undefined && { "cache-control": cache.join(", ") }),
   };
 
   if (ifNoneMatch === etag) {
