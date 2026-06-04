@@ -4,6 +4,7 @@ import { join } from "node:path";
 import mime from "mime-types";
 import { Buffer } from "node:buffer";
 import { Stats } from "node:fs";
+import { createHash } from "node:crypto";
 
 type Result<T> = { status: "success"; result: T } | { status: "error"; err: unknown };
 
@@ -89,25 +90,29 @@ const resolveCompressedFilepath = async ({
   return null;
 };
 
+type Etag = string;
+
 const buildResponse = async ({
   filepath,
   compressedFilepath,
   pathname,
   method,
+  ifNoneMatch,
 }: {
   filepath: string;
   compressedFilepath: string | null;
   method: Extract<WorkerMethod, "GET" | "HEAD">;
+  ifNoneMatch: Etag | undefined;
 } & Pick<URL, "pathname">): Promise<WorkerResponse> => {
   const effectivePath = compressedFilepath ?? filepath;
 
   type BodyResponse = {
-    body: Buffer<ArrayBuffer> | null;
+    body: Buffer<ArrayBuffer>;
   } & Pick<Stats, "size" | "mtime">;
 
   const buildBody = async (): Promise<BodyResponse> => {
     const [file, stats] = await Promise.all([
-      method === "HEAD" ? Promise.resolve(null) : readFile(effectivePath),
+      readFile(effectivePath),
       stat(effectivePath),
     ] as const);
 
@@ -119,24 +124,35 @@ const buildResponse = async ({
 
   const { body, size: byteLength, mtime: lastModified } = await buildBody();
 
+  const etag = `"${createHash("md5").update(body).digest("hex")}"`;
+
+  const headers: WorkerResponse["headers"] = {
+    ...SECURITY_HEADERS,
+    "last-modified": lastModified.toUTCString(),
+    etag,
+    vary: "Accept-Encoding",
+  };
+
+  if (ifNoneMatch === etag) {
+    return { status: 304, headers };
+  }
+
   const mimeType = mime.lookup(filepath);
 
   return {
     status: 200,
     headers: {
-      ...SECURITY_HEADERS,
+      ...headers,
       "content-type":
         typeof mimeType === "string"
           ? mimeType
           : (CUSTOM_MIME_TYPES[pathname] ?? "application/octet-stream"),
       "content-length": `${byteLength}`,
-      "last-modified": lastModified.toUTCString(),
-      vary: "Accept-Encoding",
       ...(compressedFilepath !== null && {
         "content-encoding": "br",
       }),
     },
-    ...(body !== null && { body }),
+    ...(method === "GET" && { body }),
   };
 };
 
@@ -179,7 +195,14 @@ export default {
     const { result: compressedFilepath } = compressedFilepathResult;
 
     const responseResult = await safeExec(
-      async () => await buildResponse({ filepath, compressedFilepath, pathname, method }),
+      async () =>
+        await buildResponse({
+          filepath,
+          compressedFilepath,
+          pathname,
+          method,
+          ifNoneMatch: headers?.["if-none-match"],
+        }),
     );
 
     if (responseResult.status === "error") {
