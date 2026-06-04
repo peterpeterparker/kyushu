@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "kyushu-cli"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "kyushu-runtime"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2299,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "kyushu-worker"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "kyushu-runtime",
  "rquickjs",
