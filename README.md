@@ -200,6 +200,10 @@ Use Kyushu for experimentation, local development, and learning. Do not expose i
 
 ## Known Limitations
 
+### Top-level `console.log`
+
+Calls to `console.log` and other console methods at the top level of your worker module are silently swallowed. This is a side effect of Wizer pre-initialization: writing to stdout during snapshotting corrupts internal stdio state for the runtime. Only log starting from the `fetch` handler, not at module scope (which is ignored).
+
 ### Dynamic `import()` at Runtime
 
 Some npm packages use dynamic `import()` internally as an escape hatch to avoid bundling certain dependencies:
