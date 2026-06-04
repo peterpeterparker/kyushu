@@ -41,6 +41,8 @@ Kyushu has two moving parts:
     HTTP request         HTTP response
 ```
 
+Workers are stateless by design. Each request runs in isolation and module-level variables do not persist between requests.
+
 ## Install
 
 ```bash
