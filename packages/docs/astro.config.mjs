@@ -62,7 +62,10 @@ export default defineConfig({
         themes: ["vesper"],
       },
       sidebar: [
-        { label: "Start Here", items: [{ slug: "getting-started" }] },
+        {
+          label: "Start Here",
+          items: [{ slug: "getting-started" }, { slug: "how-it-works" }],
+        },
         {
           label: "Reference",
           items: [
