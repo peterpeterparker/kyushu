@@ -23,12 +23,38 @@ pub mod native_module {
 
     #[rquickjs::function]
     pub fn write_stdout(data: String) {
+        // [PATCH]
+        // Do not write to stdout during Wizer pre-initialization. The first call to
+        // std::io::stdout() triggers wasi-libc's internal stdio buffering setup and
+        // caches it in Wasm memory. That cached state gets frozen into the snapshot
+        // and is invalid at runtime, causing any subsequent write (e.g. console.log
+        // inside a fetch handler) to hang silently with no response sent to hyper:
+        //
+        //   Error serving 127.0.0.1:57641: hyper::Error(User(Service), handler did not send a response)
+        //
+        // For example, the following worker would trigger this bug:
+        //
+        //   console.log('top-level log');
+        //
+        //   export default {
+        //     async fetch() {
+        //       console.log('this crashes');
+        //       return { status: 200, headers: { "content-type": "application/json" }, body: '{}' };
+        //     },
+        //   }
+        if crate::internal::is_wizer_active() {
+            return;
+        }
         let _ = std::io::stdout().write_all(data.as_bytes());
         let _ = std::io::stdout().flush();
     }
 
     #[rquickjs::function]
     pub fn write_stderr(data: String) {
+        // Same as write_stdout, skip during Wizer pre-initialization.
+        if crate::internal::is_wizer_active() {
+            return;
+        }
         let _ = std::io::stderr().write_all(data.as_bytes());
         let _ = std::io::stderr().flush();
     }
