@@ -1,6 +1,11 @@
 packages:
   - packages/types
   - packages/docs
+  - examples/env
+  - examples/fetch
+  - examples/file-system
+  - examples/hello-world
+
 allowBuilds:
   esbuild: true
   sharp: false
