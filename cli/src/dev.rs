@@ -1,6 +1,6 @@
 use crate::config::{DevConfig, InputConfig, WorkerConfig};
 use crate::javascript::bundle;
-use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker};
+use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerState};
 use anyhow::Result;
 use hyper::server::conn::http1;
 use notify::RecursiveMode;
