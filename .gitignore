@@ -13,6 +13,7 @@ npm-debug.log*
 dist
 worker
 !cli/src/worker
+!/worker
 
 # Cargo
 /target
