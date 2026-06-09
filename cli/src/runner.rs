@@ -1,4 +1,4 @@
-use crate::config::RunnerConfig;
+use crate::config::RunConfig;
 use crate::worker::context::WorkerContext;
 use crate::worker::linker::WorkerLinker;
 use crate::worker::state::WorkerState;
@@ -16,7 +16,7 @@ use wasmtime_wasi_http::p2::bindings::ProxyPre;
 use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
-pub async fn run(config: &RunnerConfig) -> Result<()> {
+pub async fn run(config: &RunConfig) -> Result<()> {
     let worker = config.worker.clone().unwrap_or_default();
     let wasm_path = worker.wasm();
     let port = worker.port();
@@ -64,7 +64,7 @@ pub async fn run(config: &RunnerConfig) -> Result<()> {
 
 async fn handle_request(
     pre: Arc<ProxyPre<WorkerState>>,
-    config: RunnerConfig,
+    config: RunConfig,
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<HyperOutgoingBody>> {
     let mut store = Store::new(
