@@ -7,6 +7,7 @@ mod config;
 mod dev;
 mod javascript;
 mod runner;
+mod server;
 mod worker;
 
 #[derive(Parser)]
