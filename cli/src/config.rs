@@ -1,7 +1,13 @@
 use serde::Deserialize;
 
 #[derive(Deserialize, Default, Clone)]
-pub struct RunnerConfig {
+pub struct KyuConfig {
+    pub run: Option<RunConfig>,
+    pub build: Option<BuildConfig>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+pub struct RunConfig {
     pub worker: Option<WorkerConfig>,
     pub mounts: Option<Vec<MountConfig>>,
     pub env: Option<Vec<EnvConfig>>,

@@ -3,10 +3,10 @@
 set -e
 
 echo "Building worker..."
-./target/release/kyu build tests/fixtures/env/kyushu.build.toml
+./target/release/kyu build tests/fixtures/env/kyushu.toml
 
 echo "Starting runner..."
-./target/release/kyu run tests/fixtures/env/kyushu.run.toml &
+./target/release/kyu run tests/fixtures/env/kyushu.toml &
 KYU_PID=$!
 
 trap "kill $KYU_PID 2>/dev/null" EXIT

@@ -1,7 +1,0 @@
-[worker]
-wasm = "dist/__kyushu_worker.wasm"
-port = 5987
-
-[[env]]
-key = "API_KEY"
-value = "secret"
