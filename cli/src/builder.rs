@@ -2,7 +2,7 @@ use anyhow::Result;
 use wasmtime::Store;
 use wasmtime_wizer::Wizer;
 
-use crate::config::BuildConfig;
+use crate::config::{InputConfig, OutputConfig};
 use crate::javascript::bundle;
 use crate::worker::context::WorkerContext;
 use crate::worker::linker::WorkerLinker;
@@ -22,29 +22,29 @@ pub static WORKER_TEMPLATE: &[u8] =
 pub static WORKER_TEMPLATE: &[u8] =
     include_bytes!("../../target/wasm32-wasip2/debug/kyushu_worker.wasm");
 
-pub async fn build(config: &BuildConfig) -> Result<()> {
+pub async fn build(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
     WorkerVersion::new()
         .with_bytes(WORKER_TEMPLATE)
         .print()
         .await?;
 
-    bundle_js(config).await?;
+    bundle_js(input_config, output_config).await?;
 
     Ok(())
 }
 
-async fn bundle_js(config: &BuildConfig) -> Result<()> {
-    let entry = config.entry();
-    let outdir = config.outdir();
-    let worker_wasm = config.worker_wasm();
+async fn bundle_js(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
+    let src = input_config.src();
+    let outdir = output_config.dir();
+    let worker_wasm = output_config.worker_wasm();
 
     std::fs::create_dir_all(outdir)?;
 
-    // Bundle the developer's JS/TS entry point into a single ESM file
+    // Bundle the developer's JS/TS src point into a single ESM file
     // using Rolldown. The output is captured in memory.
-    println!("Bundling {}...", entry);
+    println!("Bundling {}...", src);
 
-    let bundle_str = bundle(entry).await?;
+    let bundle_str = bundle(src).await?;
 
     // Step 2: pre-initialize the worker Wasm template with the JS bundle using Wizer.
     //

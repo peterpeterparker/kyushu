@@ -4,7 +4,8 @@ use serde::Deserialize;
 pub struct KyuConfig {
     pub dev: Option<DevConfig>,
     pub run: Option<RunConfig>,
-    pub build: Option<BuildConfig>,
+    pub input: Option<InputConfig>,
+    pub output: Option<OutputConfig>,
     pub worker: Option<WorkerConfig>,
 }
 
@@ -20,10 +21,14 @@ pub struct RunConfig {
 }
 
 #[derive(Deserialize, Default, Clone)]
-pub struct BuildConfig {
-    pub entry: Option<String>,
-    pub outdir: Option<String>,
-    pub outfile: Option<String>,
+pub struct InputConfig {
+    pub src: Option<String>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+pub struct OutputConfig {
+    pub dir: Option<String>,
+    pub file: Option<String>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -64,20 +69,22 @@ impl RunConfig {
     }
 }
 
-impl BuildConfig {
-    pub fn entry(&self) -> &str {
-        self.entry.as_deref().unwrap_or("src/index.ts")
+impl InputConfig {
+    pub fn src(&self) -> &str {
+        self.src.as_deref().unwrap_or("src/index.ts")
+    }
+}
+
+impl OutputConfig {
+    pub fn dir(&self) -> &str {
+        self.dir.as_deref().unwrap_or("worker")
     }
 
-    pub fn outdir(&self) -> &str {
-        self.outdir.as_deref().unwrap_or("worker")
-    }
-
-    pub fn outfile(&self) -> &str {
-        self.outfile.as_deref().unwrap_or("__kyushu_worker.wasm")
+    pub fn file(&self) -> &str {
+        self.file.as_deref().unwrap_or("__kyushu_worker.wasm")
     }
 
     pub fn worker_wasm(&self) -> String {
-        format!("{}/{}", self.outdir(), self.outfile())
+        format!("{}/{}", self.dir(), self.file())
     }
 }

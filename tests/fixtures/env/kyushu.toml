@@ -1,6 +1,8 @@
-[build]
-entry = "tests/fixtures/env/index.ts"
-outdir = "dist"
+[input]
+src = "tests/fixtures/env/index.ts"
+
+[output]
+dir = "dist"
 
 [run]
 wasm = "dist/__kyushu_worker.wasm"

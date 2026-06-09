@@ -3,11 +3,11 @@ use rolldown::{
     AddonOutputOption, Bundler, BundlerOptions, InputItem, OutputFormat, Platform, RawMinifyOptions,
 };
 
-/// Bundle the developer's JS/TS entry point into a single ESM string.
-pub async fn bundle(entry: &str) -> Result<String> {
+/// Bundle the developer's JS/TS src point into a single ESM string.
+pub async fn bundle(src: &str) -> Result<String> {
     let mut bundler = Bundler::new(BundlerOptions {
         input: Some(vec![InputItem {
-            import: entry.to_string(),
+            import: src.to_string(),
             ..Default::default()
         }]),
         platform: Some(Platform::Node),
@@ -64,8 +64,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_bundle_simple() {
-        let entry = format!("{}/fixtures/hello.ts", env!("CARGO_MANIFEST_DIR"));
-        let result = bundle(&entry).await;
+        let src = format!("{}/fixtures/hello.ts", env!("CARGO_MANIFEST_DIR"));
+        let result = bundle(&src).await;
         assert!(result.is_ok());
 
         let code = result.unwrap();
@@ -74,7 +74,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_bundle_invalid_entry() {
+    async fn test_bundle_invalid_src() {
         let result = bundle("nonexistent.ts").await;
         assert!(result.is_err());
     }

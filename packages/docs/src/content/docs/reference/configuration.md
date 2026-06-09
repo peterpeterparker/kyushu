@@ -15,16 +15,18 @@ You can split your configuration across separate files for development and your 
 
 Controls how `kyu build` bundles and pre-initializes your worker.
 
-| Field     | Type   | Default                | Description                                       |
-| --------- | ------ | ---------------------- | ------------------------------------------------- |
-| `entry`   | string | `src/index.ts`         | Path to your TypeScript or JavaScript entry point |
-| `outdir`  | string | `worker`               | Output directory for the built worker             |
-| `outfile` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
+| Field         | Type   | Default                | Description                                       |
+| ------------- | ------ | ---------------------- | ------------------------------------------------- |
+| `input.src`   | string | `src/index.ts`         | Path to your TypeScript or JavaScript entry point |
+| `output.dir`  | string | `worker`               | Output directory for the built worker             |
+| `output.file` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
 
 ```toml
-[build]
-entry = "src/server.ts"
-outdir = "dist"
+[input]
+src = "src/server.ts"
+
+[output]
+dir = "dist"
 ```
 
 ## Run

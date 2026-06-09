@@ -1,2 +1,2 @@
-[build]
-entry = "src/server.ts"
+[input]
+src = "src/server.ts"
