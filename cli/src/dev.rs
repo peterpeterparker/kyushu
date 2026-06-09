@@ -26,9 +26,8 @@ pub async fn dev(
     let port = dev_config.port();
 
     // Unlike the runner which loads a pre-built Wizer snapshot via ProxyPre,
-    // dev mode skips Wizer entirely and holds a raw InstancePre. wizer-initialize
+    // dev mode skips Wizer entirely and holds a raw InstancePre. kyu-initialize
     // is called fresh on each request to initialize the JS runtime with the current bundle.
-    // TODO: duplicate wizer-initialize to a custom function
     let instance_pre = Arc::new(RwLock::new(build_instance_pre(input_config).await?));
 
     // Live reload watcher
@@ -144,25 +143,24 @@ async fn handle_request(
             .build(),
     );
 
-    // Instantiate the worker template and call wizer-initialize with the
-    // current bundle before handling the request. This replaces the Wizer
-    // snapshot step — the JS runtime is initialized fresh per request in dev.
+    // Instantiate the worker template and call kyu-initialize with the
+    // current bundle before handling the request.
     let instance = instance_pre
         .instantiate_async(&mut store)
         .await
         .map_err(|e| anyhow::anyhow!("failed to instantiate worker: {e:?}"))?;
 
-    let wizer_initialize = instance
-        .get_typed_func::<(), ()>(&mut store, "wizer-initialize")
-        .map_err(|e| anyhow::anyhow!("failed to get wizer-initialize export: {e:?}"))?;
+    let kyu_initialize = instance
+        .get_typed_func::<(), ()>(&mut store, "kyu-initialize")
+        .map_err(|e| anyhow::anyhow!("failed to get kyu-initialize export: {e:?}"))?;
 
-    wizer_initialize
+    kyu_initialize
         .call_async(&mut store, ())
         .await
-        .map_err(|e| anyhow::anyhow!("wizer-initialize failed: {e:?}"))?;
+        .map_err(|e| anyhow::anyhow!("kyu-initialize failed: {e:?}"))?;
 
     // Construct a Proxy from the already-initialized instance using ProxyIndices,
-    // so handle runs on the same instance that wizer-initialize ran on.
+    // so handle runs on the same instance that kyu-initialize ran on.
     let proxy = ProxyIndices::new(&instance_pre)
         .map_err(|e| anyhow::anyhow!("failed to create ProxyIndices: {e:?}"))?
         .load(&mut store, &instance)
