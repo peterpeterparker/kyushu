@@ -17,7 +17,7 @@ targets = [
   "x86_64-unknown-linux-gnu",
 ]
 # Path that installers should place binaries in
-install-path = "CARGO_HOME"
+install-path = "~/.kyu/bin"
 # Whether to install an updater program
 install-updater = false
 # A prefix git tags must include for dist to care about them
