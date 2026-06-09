@@ -23,3 +23,5 @@ hyper = { version = "1", features = ["http1", "server"] }
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
 rolldown = "1.0.0"
+notify = "8.2.0"
+notify-debouncer-mini = "0.7.0"

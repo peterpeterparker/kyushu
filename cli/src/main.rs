@@ -3,6 +3,7 @@ use clap::Parser;
 
 mod builder;
 mod config;
+mod dev;
 mod javascript;
 mod runner;
 mod worker;
@@ -19,6 +20,11 @@ enum Cli {
     },
     /// Build the worker Wasm from JS/TS source
     Build {
+        #[arg()]
+        config: Option<String>,
+    },
+    /// Start a local development server with hot-reload
+    Dev {
         #[arg()]
         config: Option<String>,
     },
@@ -58,6 +64,11 @@ async fn main() -> Result<()> {
             config: config_path,
         } => {
             builder::build(&read_config(config_path.as_deref())?).await?;
+        }
+        Cli::Dev {
+            config: config_path,
+        } => {
+            dev::dev(read_config(config_path.as_deref())?).await?;
         }
     }
 

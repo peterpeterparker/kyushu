@@ -13,6 +13,17 @@ pub struct WorkerConfig {
     pub port: Option<u16>,
 }
 
+// TODO: one config file to rule them all
+#[derive(Deserialize, Default, Clone)]
+pub struct DevConfig {
+    pub worker: Option<WorkerConfig>,
+    pub mounts: Option<Vec<MountConfig>>,
+    pub env: Option<Vec<EnvConfig>>,
+    pub entry: Option<String>,
+    pub outdir: Option<String>,
+    pub outfile: Option<String>,
+}
+
 impl WorkerConfig {
     pub fn wasm(&self) -> &str {
         self.wasm
@@ -62,4 +73,22 @@ pub struct MountConfig {
 pub struct EnvConfig {
     pub key: String,
     pub value: String,
+}
+
+impl DevConfig {
+    pub fn entry(&self) -> &str {
+        self.entry.as_deref().unwrap_or("src/index.ts")
+    }
+
+    pub fn outdir(&self) -> &str {
+        self.outdir.as_deref().unwrap_or("worker")
+    }
+
+    pub fn outfile(&self) -> &str {
+        self.outfile.as_deref().unwrap_or("__kyushu_worker.wasm")
+    }
+
+    pub fn worker_wasm(&self) -> String {
+        format!("{}/{}", self.outdir(), self.outfile())
+    }
 }
