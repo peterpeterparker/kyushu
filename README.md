@@ -196,9 +196,10 @@ Configure the development server.
 port = 5987  # default
 ```
 
-| Field      | Type   | Default | Description       |
-| ---------- | ------ | ------- | ----------------- |
-| `dev.port` | number | `5987`  | Port to listen on |
+| Field       | Type   | Default | Description                                     |
+| ----------- | ------ | ------- | ----------------------------------------------- |
+| `dev.port`  | number | `5987`  | Port to listen on                               |
+| `dev.watch` | bool   | `true`  | Watch for file changes and reload automatically |
 
 A custom `[input]` or `[worker]` configuration can also be applied; the details are omitted for brevity but follow the same options documented above.
 
