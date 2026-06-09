@@ -5,9 +5,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use wasmtime::Store;
 use wasmtime::component::Component;
-use wasmtime_wasi_http::p2::WasiHttpView;
 use wasmtime_wasi_http::p2::bindings::ProxyPre;
-use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 pub async fn run(run_config: &RunConfig, worker_config: &WorkerConfig) -> Result<()> {
