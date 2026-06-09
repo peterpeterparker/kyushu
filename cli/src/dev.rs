@@ -1,18 +1,15 @@
 use crate::config::{DevConfig, InputConfig, WorkerConfig};
 use crate::javascript::bundle;
+use crate::server;
 use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerState};
 use anyhow::Result;
-use hyper::server::conn::http1;
 use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use wasmtime::Store;
 use wasmtime::component::{Component, InstancePre};
-use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p2::WasiHttpView;
 use wasmtime_wasi_http::p2::bindings::ProxyIndices;
 use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
@@ -39,33 +36,17 @@ pub async fn dev(
         }
     });
 
-    // TODO: duplicate runner
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = TcpListener::bind(addr).await?;
-    println!("Listening on http://0.0.0.0:{}", port);
+    let callback = |(instance_pre, config): (
+        Arc<RwLock<InstancePre<WorkerState>>>,
+        WorkerConfig,
+    ),
+                    req| async move {
+        handle_request(instance_pre, config, req).await
+    };
 
-    loop {
-        let (stream, addr) = listener.accept().await?;
-        let instance_pre = instance_pre.clone();
-        let config = worker_config.clone();
+    server::serve(port, (instance_pre, worker_config.clone()), callback).await?;
 
-        tokio::spawn(async move {
-            if let Err(e) = http1::Builder::new()
-                .keep_alive(true)
-                .serve_connection(
-                    TokioIo::new(stream),
-                    hyper::service::service_fn(move |req| {
-                        let instance_pre = instance_pre.clone();
-                        let config = config.clone();
-                        async move { handle_request(instance_pre, config, req).await }
-                    }),
-                )
-                .await
-            {
-                eprintln!("Error serving {addr}: {e:?}");
-            }
-        });
-    }
+    Ok(())
 }
 
 async fn build_instance_pre(input_config: &InputConfig) -> Result<InstancePre<WorkerState>> {

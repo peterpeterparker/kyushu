@@ -1,13 +1,10 @@
 use crate::config::{RunConfig, WorkerConfig};
+use crate::server;
 use crate::worker::{WorkerContext, WorkerLinker, WorkerState, WorkerVersion};
 use anyhow::Result;
-use hyper::server::conn::http1;
-use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use wasmtime::Store;
 use wasmtime::component::Component;
-use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p2::WasiHttpView;
 use wasmtime_wasi_http::p2::bindings::ProxyPre;
 use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
@@ -30,32 +27,13 @@ pub async fn run(run_config: &RunConfig, worker_config: &WorkerConfig) -> Result
     let component = Component::from_file(&engine, wasm_path)?;
     let pre = Arc::new(ProxyPre::new(linker.instantiate_pre(&component)?)?);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    let listener = TcpListener::bind(addr).await?;
-    println!("Listening on http://0.0.0.0:{}", port);
+    let callback = |(pre, config): (Arc<ProxyPre<WorkerState>>, WorkerConfig), req| async move {
+        handle_request(pre, config, req).await
+    };
 
-    loop {
-        let (stream, addr) = listener.accept().await?;
-        let pre = pre.clone();
-        let config = worker_config.clone();
+    server::serve(port, (pre, worker_config.clone()), callback).await?;
 
-        tokio::spawn(async move {
-            if let Err(e) = http1::Builder::new()
-                .keep_alive(true)
-                .serve_connection(
-                    TokioIo::new(stream),
-                    hyper::service::service_fn(move |req| {
-                        let pre = pre.clone();
-                        let config = config.clone();
-                        async move { handle_request(pre, config, req).await }
-                    }),
-                )
-                .await
-            {
-                eprintln!("Error serving {addr}: {e:?}");
-            }
-        });
-    }
+    Ok(())
 }
 
 async fn handle_request(
