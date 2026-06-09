@@ -5,6 +5,7 @@ packages:
   - examples/fetch
   - examples/file-system
   - examples/hello-world
+  - tests
 
 allowBuilds:
   esbuild: true

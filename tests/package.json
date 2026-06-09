@@ -1,0 +1,13 @@
+{
+  "name": "kyushu-tests",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest",
+    "test:debug": "vitest --mode debug"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.7"
+  }
+}
