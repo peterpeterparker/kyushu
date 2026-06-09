@@ -52,7 +52,7 @@ async fn main() -> Result<()> {
             config: config_path,
         } => {
             let config: KyuConfig = read_config(config_path.as_deref())?;
-            runner::run(&config.worker.unwrap_or_default()).await?;
+            runner::run(&config.run.unwrap_or_default()).await?;
         }
         Cli::Build {
             config: config_path,
