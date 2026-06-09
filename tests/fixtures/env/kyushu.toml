@@ -1,0 +1,11 @@
+[build]
+entry = "tests/fixtures/env/index.ts"
+outdir = "dist"
+
+[run]
+wasm = "dist/__kyushu_worker.wasm"
+port = 5987
+
+[[worker.env]]
+key = "API_KEY"
+value = "secret"

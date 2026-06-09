@@ -1,4 +1,4 @@
-use crate::config::RunnerConfig;
+use crate::config::{RunConfig, WorkerConfig};
 use crate::worker::context::WorkerContext;
 use crate::worker::linker::WorkerLinker;
 use crate::worker::state::WorkerState;
@@ -16,10 +16,9 @@ use wasmtime_wasi_http::p2::bindings::ProxyPre;
 use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
-pub async fn run(config: RunnerConfig) -> Result<()> {
-    let worker = config.worker.clone().unwrap_or_default();
-    let wasm_path = worker.wasm();
-    let port = worker.port();
+pub async fn run(run_config: &RunConfig, worker_config: &WorkerConfig) -> Result<()> {
+    let wasm_path = run_config.wasm();
+    let port = run_config.port();
 
     println!("Loading {}...", wasm_path);
 
@@ -41,7 +40,7 @@ pub async fn run(config: RunnerConfig) -> Result<()> {
     loop {
         let (stream, addr) = listener.accept().await?;
         let pre = pre.clone();
-        let config = config.clone();
+        let config = worker_config.clone();
 
         tokio::spawn(async move {
             if let Err(e) = http1::Builder::new()
@@ -64,7 +63,7 @@ pub async fn run(config: RunnerConfig) -> Result<()> {
 
 async fn handle_request(
     pre: Arc<ProxyPre<WorkerState>>,
-    config: RunnerConfig,
+    config: WorkerConfig,
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<HyperOutgoingBody>> {
     let mut store = Store::new(

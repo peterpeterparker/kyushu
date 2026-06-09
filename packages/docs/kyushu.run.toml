@@ -1,3 +1,3 @@
-[[mounts]]
+[[worker.mounts]]
 host = "dist"
 guest = "/dist"

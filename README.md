@@ -141,9 +141,9 @@ The available options and their defaults:
 Configure the build step.
 
 ```toml
-# kyushu.build.toml
-entry = "src/index.ts"       # default
-outdir = "worker"            # default
+[build]
+entry = "src/index.ts"            # default
+outdir = "worker"                 # default
 outfile = "__kyushu_worker.wasm"  # default
 ```
 
@@ -158,32 +158,31 @@ outfile = "__kyushu_worker.wasm"  # default
 Configure the runner.
 
 ```toml
-# kyushu.run.toml
-[worker]
+[run]
 wasm = "worker/__kyushu_worker.wasm"  # default
 port = 5987                           # default
 
-[[mounts]]
+[[worker.mounts]]
 host = "."
 guest = "/"
 writable = true
 
-[[env]]
+[[worker.env]]
 key = "API_KEY"
 value = "secret"
 ```
 
-| Field               | Type   | Default                       | Description                                         |
-| ------------------- | ------ | ----------------------------- | --------------------------------------------------- |
-| `worker.wasm`       | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file               |
-| `worker.port`       | number | `5987`                        | Port to listen on                                   |
-| `mounts`            | array  | —                             | Filesystem mounts to expose to the worker           |
-| `mounts[].host`     | string | —                             | Path on the host filesystem                         |
-| `mounts[].guest`    | string | —                             | Path inside the worker sandbox                      |
-| `mounts[].writable` | bool   | `false`                       | Whether the mount is writable (default to readonly) |
-| `env`               | array  | —                             | Environment variables to expose to the worker       |
-| `env[].key`         | string | —                             | Environment variable name                           |
-| `env[].value`       | string | —                             | Environment variable value                          |
+| Field                      | Type   | Default                       | Description                                   |
+| -------------------------- | ------ | ----------------------------- | --------------------------------------------- |
+| `run.wasm`                 | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file         |
+| `run.port`                 | number | `5987`                        | Port to listen on                             |
+| `worker.mounts`            | array  | —                             | Filesystem mounts to expose to the worker     |
+| `worker.mounts[].host`     | string | —                             | Path on the host filesystem                   |
+| `worker.mounts[].guest`    | string | —                             | Path inside the worker sandbox                |
+| `worker.mounts[].writable` | bool   | `false`                       | Whether the mount is writable                 |
+| `worker.env`               | array  | —                             | Environment variables to expose to the worker |
+| `worker.env[].key`         | string | —                             | Environment variable name                     |
+| `worker.env[].value`       | string | —                             | Environment variable value                    |
 
 ## Security
 
