@@ -1,15 +1,15 @@
+use crate::worker::WorkerState;
 use anyhow::Result;
 use hyper::server::conn::http1;
 use hyper::{Request, Response, body::Incoming};
 use std::future::Future;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
-use wasmtime_wasi_http::io::TokioIo;
 use wasmtime::Store;
+use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p2::WasiHttpView;
 use wasmtime_wasi_http::p2::bindings::Proxy;
 use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
-use crate::worker::WorkerState;
 
 /// Binds a TCP listener on the given port and serves incoming HTTP/1.1 connections.
 /// Each connection is handled in a spawned task using the provided handler function.

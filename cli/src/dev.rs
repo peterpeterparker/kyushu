@@ -10,9 +10,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use wasmtime::Store;
 use wasmtime::component::{Component, InstancePre};
-use wasmtime_wasi_http::p2::WasiHttpView;
 use wasmtime_wasi_http::p2::bindings::ProxyIndices;
-use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 pub async fn dev(
@@ -28,13 +26,11 @@ pub async fn dev(
     let instance_pre = Arc::new(RwLock::new(build_instance_pre(input_config).await?));
 
     // Live reload watcher
-    let instance_pre_watcher = instance_pre.clone();
-    let config = input_config.clone();
-    tokio::spawn(async move {
-        if let Err(e) = watch(config, instance_pre_watcher).await {
-            eprintln!("Watcher error: {e:?}");
-        }
-    });
+    if dev_config.watch() {
+        init_watch(input_config, &instance_pre);
+    } else {
+        println!("Live reload disabled.");
+    }
 
     let callback = |(instance_pre, config): (
         Arc<RwLock<InstancePre<WorkerState>>>,
@@ -67,6 +63,16 @@ async fn build_instance_pre(input_config: &InputConfig) -> Result<InstancePre<Wo
     linker
         .instantiate_pre(&component)
         .map_err(|e| anyhow::anyhow!("failed to create InstancePre: {e:?}"))
+}
+
+fn init_watch(input_config: &InputConfig, instance_pre: &Arc<RwLock<InstancePre<WorkerState>>>) {
+    let instance_pre_watcher = instance_pre.clone();
+    let config = input_config.clone();
+    tokio::spawn(async move {
+        if let Err(e) = watch(config, instance_pre_watcher).await {
+            eprintln!("Watcher error: {e:?}");
+        }
+    });
 }
 
 async fn watch(
