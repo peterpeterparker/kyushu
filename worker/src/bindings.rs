@@ -17,10 +17,10 @@ pub unsafe fn _export_kyu_initialize_cabi<T: Guest>() {
 }
 #[doc(hidden)]
 #[allow(non_snake_case)]
-pub unsafe fn _export_get_version_cabi<T: Guest>() -> *mut u8 {
+pub unsafe fn _export_kyu_version_cabi<T: Guest>() -> *mut u8 {
     #[cfg(target_arch = "wasm32")]
     _rt::run_ctors_once();
-    let result0 = T::get_version();
+    let result0 = T::kyu_version();
     let ptr1 = (&raw mut _RET_AREA.0).cast::<u8>();
     let vec2 = (result0.into_bytes()).into_boxed_slice();
     let ptr2 = vec2.as_ptr().cast::<u8>();
@@ -34,7 +34,7 @@ pub unsafe fn _export_get_version_cabi<T: Guest>() -> *mut u8 {
 }
 #[doc(hidden)]
 #[allow(non_snake_case)]
-pub unsafe fn __post_return_get_version<T: Guest>(arg0: *mut u8) {
+pub unsafe fn __post_return_kyu_version<T: Guest>(arg0: *mut u8) {
     let l0 = *arg0.add(0).cast::<*mut u8>();
     let l1 = *arg0
         .add(::core::mem::size_of::<*const u8>())
@@ -47,7 +47,7 @@ pub trait Guest {
     /// Called by kyu dev to initialize the JS runtime with the current bundle.
     fn kyu_initialize() -> ();
     /// Exposes the worker version, baked in at compile time via CARGO_PKG_VERSION.
-    fn get_version() -> _rt::String;
+    fn kyu_version() -> _rt::String;
 }
 #[doc(hidden)]
 macro_rules! __export_world_worker_cabi {
@@ -57,11 +57,11 @@ macro_rules! __export_world_worker_cabi {
         _export_wizer_initialize_cabi::<$ty > () } } #[unsafe (export_name =
         "kyu-initialize")] unsafe extern "C" fn export_kyu_initialize() { unsafe {
         $($path_to_types)*:: _export_kyu_initialize_cabi::<$ty > () } } #[unsafe
-        (export_name = "get-version")] unsafe extern "C" fn export_get_version() -> * mut
-        u8 { unsafe { $($path_to_types)*:: _export_get_version_cabi::<$ty > () } }
-        #[unsafe (export_name = "cabi_post_get-version")] unsafe extern "C" fn
-        _post_return_get_version(arg0 : * mut u8,) { unsafe { $($path_to_types)*::
-        __post_return_get_version::<$ty > (arg0) } } };
+        (export_name = "kyu-version")] unsafe extern "C" fn export_kyu_version() -> * mut
+        u8 { unsafe { $($path_to_types)*:: _export_kyu_version_cabi::<$ty > () } }
+        #[unsafe (export_name = "cabi_post_kyu-version")] unsafe extern "C" fn
+        _post_return_kyu_version(arg0 : * mut u8,) { unsafe { $($path_to_types)*::
+        __post_return_kyu_version::<$ty > (arg0) } } };
     };
 }
 #[doc(hidden)]
@@ -8929,7 +8929,7 @@ h\x07\x01k\x1b\x01@\x01\x03err\x8b\x01\0\x8c\x01\x04\0\x0fhttp-error-code\x01\x8
 \0\x06\x01i\x01\x01i\x03\x01k\x09\x01i\x05\x01j\x01\x0b\x01\x07\x01@\x02\x07requ\
 est\x08\x07options\x0a\0\x0c\x04\0\x06handle\x01\x0d\x03\0!wasi:http/outgoing-ha\
 ndler@0.2.11\x05\x14\x01@\0\x01\0\x04\0\x10wizer-initialize\x01\x15\x04\0\x0ekyu\
--initialize\x01\x15\x01@\0\0s\x04\0\x0bget-version\x01\x16\x02\x03\0\x0a\x10inco\
+-initialize\x01\x15\x01@\0\0s\x04\0\x0bkyu-version\x01\x16\x02\x03\0\x0a\x10inco\
 ming-request\x02\x03\0\x0a\x11response-outparam\x01B\x08\x02\x03\x02\x01\x17\x04\
 \0\x10incoming-request\x03\0\0\x02\x03\x02\x01\x18\x04\0\x11response-outparam\x03\
 \0\x02\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0cresponse-out\x05\x01\0\x04\0\

@@ -34,7 +34,7 @@ impl WorkerVersion {
         let mut store = Store::new(&engine, WorkerContext::new().build());
 
         let instance = linker.instantiate_async(&mut store, &component).await?;
-        let get_version = instance.get_typed_func::<(), (String,)>(&mut store, "get-version")?;
+        let get_version = instance.get_typed_func::<(), (String,)>(&mut store, "kyu-version")?;
         let (version,) = get_version.call_async(&mut store, ()).await?;
 
         Ok(version)
