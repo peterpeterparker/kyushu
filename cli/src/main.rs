@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use config::KyuConfig;
 
 mod builder;
 mod config;
@@ -24,21 +25,19 @@ enum Cli {
     },
 }
 
-fn read_config<T: for<'de> serde::Deserialize<'de> + Default>(
-    config_path: Option<&str>,
-) -> Result<T> {
+fn read_config(config_path: Option<&str>) -> Result<KyuConfig> {
     let Some(config_path) = config_path else {
-        return Ok(T::default());
+        return Ok(KyuConfig::default());
     };
 
     if !std::path::Path::new(config_path).exists() {
-        return Ok(T::default());
+        return Ok(KyuConfig::default());
     }
 
     let contents = std::fs::read_to_string(config_path)?;
     if contents.trim().is_empty() {
         eprintln!("Warning: {} is empty, using defaults.", config_path);
-        return Ok(T::default());
+        return Ok(KyuConfig::default());
     }
 
     Ok(toml::from_str(&contents)?)
@@ -52,12 +51,14 @@ async fn main() -> Result<()> {
         Cli::Run {
             config: config_path,
         } => {
-            runner::run(read_config(config_path.as_deref())?).await?;
+            let config: KyuConfig = read_config(config_path.as_deref())?;
+            runner::run(&config.worker.unwrap_or_default()).await?;
         }
         Cli::Build {
             config: config_path,
         } => {
-            builder::build(&read_config(config_path.as_deref())?).await?;
+            let config = read_config(config_path.as_deref())?;
+            builder::build(&config.build.unwrap_or_default()).await?;
         }
     }
 
