@@ -4,23 +4,7 @@ use wasmtime_wizer::Wizer;
 
 use crate::config::{InputConfig, OutputConfig};
 use crate::javascript::bundle;
-use crate::worker::context::WorkerContext;
-use crate::worker::linker::WorkerLinker;
-use crate::worker::version::WorkerVersion;
-
-/// Pre-built worker Wasm template, compiled from the kyushu-worker crate.
-/// `kyu build` embeds the developer's JS bundle into this template via Wizer
-/// pre-initialization, producing a self-contained worker.wasm.
-#[cfg(not(feature = "local-worker"))]
-pub static WORKER_TEMPLATE: &[u8] = include_bytes!("../resources/kyushu_worker.wasm");
-
-#[cfg(all(feature = "local-worker", not(debug_assertions)))]
-pub static WORKER_TEMPLATE: &[u8] =
-    include_bytes!("../../target/wasm32-wasip2/release/kyushu_worker.wasm");
-
-#[cfg(all(feature = "local-worker", debug_assertions))]
-pub static WORKER_TEMPLATE: &[u8] =
-    include_bytes!("../../target/wasm32-wasip2/debug/kyushu_worker.wasm");
+use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerVersion};
 
 pub async fn build(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
     WorkerVersion::new()
