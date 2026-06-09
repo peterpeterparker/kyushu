@@ -35,7 +35,7 @@ pub async fn build(input_config: &InputConfig, output_config: &OutputConfig) -> 
 
 async fn bundle_js(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
     let src = input_config.src();
-    let outdir = output_config.outdir();
+    let outdir = output_config.dir();
     let worker_wasm = output_config.worker_wasm();
 
     std::fs::create_dir_all(outdir)?;

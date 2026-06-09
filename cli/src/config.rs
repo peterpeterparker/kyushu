@@ -21,8 +21,8 @@ pub struct InputConfig {
 
 #[derive(Deserialize, Default, Clone)]
 pub struct OutputConfig {
-    pub outdir: Option<String>,
-    pub outfile: Option<String>,
+    pub dir: Option<String>,
+    pub file: Option<String>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -64,15 +64,15 @@ impl InputConfig {
 }
 
 impl OutputConfig {
-    pub fn outdir(&self) -> &str {
-        self.outdir.as_deref().unwrap_or("worker")
+    pub fn dir(&self) -> &str {
+        self.dir.as_deref().unwrap_or("worker")
     }
 
-    pub fn outfile(&self) -> &str {
-        self.outfile.as_deref().unwrap_or("__kyushu_worker.wasm")
+    pub fn file(&self) -> &str {
+        self.file.as_deref().unwrap_or("__kyushu_worker.wasm")
     }
 
     pub fn worker_wasm(&self) -> String {
-        format!("{}/{}", self.outdir(), self.outfile())
+        format!("{}/{}", self.dir(), self.file())
     }
 }
