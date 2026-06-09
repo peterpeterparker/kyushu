@@ -4,10 +4,7 @@ use wasmtime_wizer::Wizer;
 
 use crate::config::{InputConfig, OutputConfig};
 use crate::javascript::bundle;
-use crate::worker::WORKER_TEMPLATE;
-use crate::worker::context::WorkerContext;
-use crate::worker::linker::WorkerLinker;
-use crate::worker::version::WorkerVersion;
+use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerVersion};
 
 pub async fn build(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
     WorkerVersion::new()

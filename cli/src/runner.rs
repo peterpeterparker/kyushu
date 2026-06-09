@@ -1,8 +1,5 @@
 use crate::config::{RunConfig, WorkerConfig};
-use crate::worker::context::WorkerContext;
-use crate::worker::linker::WorkerLinker;
-use crate::worker::state::WorkerState;
-use crate::worker::version::WorkerVersion;
+use crate::worker::{WorkerContext, WorkerLinker, WorkerState, WorkerVersion};
 use anyhow::Result;
 use hyper::server::conn::http1;
 use std::net::SocketAddr;
