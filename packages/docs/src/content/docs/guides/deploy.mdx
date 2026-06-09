@@ -34,7 +34,7 @@ This guide covers deploying a Kyushu worker on a fresh VPS. The example uses Het
 
 3. **Deploy your worker**
 
-   Copy your built artifacts to the VPS — the `kyushu.run.toml`, the compiled wasm, and any static files:
+   Copy your built artifacts to the VPS — the `kyushu.toml`, the compiled wasm, and any static files:
 
    ```bash
    mkdir -p /opt/yourwebsite
@@ -50,7 +50,7 @@ This guide covers deploying a Kyushu worker on a fresh VPS. The example uses Het
    After=network.target
 
    [Service]
-   ExecStart=/root/.cargo/bin/kyu run kyushu.run.toml
+   ExecStart=/root/.cargo/bin/kyu run kyushu.toml
    WorkingDirectory=/opt/yourwebsite
    Restart=on-failure
    RestartSec=5

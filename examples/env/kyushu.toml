@@ -1,3 +1,3 @@
-[[env]]
+[[worker.env]]
 key = "API_KEY"
 value = "secret"
