@@ -7,6 +7,10 @@ Kyushu works out of the box. Each command uses defaults but supports its own opt
 
 The build config typically lives on your local machine and in CI, while the run config lives where you serve your worker.
 
+:::note
+You can split your configuration across separate files for development and your server, or keep everything in a single e.g. `kyushu.toml`. There are no strict rules, up to you.
+:::
+
 ## Build
 
 Controls how `kyu build` bundles and pre-initializes your worker.
