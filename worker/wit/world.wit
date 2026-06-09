@@ -24,6 +24,9 @@ world worker {
   // Called by Wizer to pre-initialize the worker with the JS bundle
   export wizer-initialize: func();
 
+  // Called by kyu dev to initialize the JS runtime with the current bundle.
+  export kyu-initialize: func();
+
   // Exposes the worker version, baked in at compile time via CARGO_PKG_VERSION.
   export get-version: func() -> string;
 }
