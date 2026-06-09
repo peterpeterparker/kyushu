@@ -34,17 +34,17 @@ pub async fn build(config: &BuildConfig) -> Result<()> {
 }
 
 async fn bundle_js(config: &BuildConfig) -> Result<()> {
-    let entry = config.entry();
+    let src = config.src();
     let outdir = config.outdir();
     let worker_wasm = config.worker_wasm();
 
     std::fs::create_dir_all(outdir)?;
 
-    // Bundle the developer's JS/TS entry point into a single ESM file
+    // Bundle the developer's JS/TS src point into a single ESM file
     // using Rolldown. The output is captured in memory.
-    println!("Bundling {}...", entry);
+    println!("Bundling {}...", src);
 
-    let bundle_str = bundle(entry).await?;
+    let bundle_str = bundle(src).await?;
 
     // Step 2: pre-initialize the worker Wasm template with the JS bundle using Wizer.
     //

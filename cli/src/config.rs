@@ -15,7 +15,7 @@ pub struct RunConfig {
 
 #[derive(Deserialize, Default, Clone)]
 pub struct BuildConfig {
-    pub entry: Option<String>,
+    pub src: Option<String>,
     pub outdir: Option<String>,
     pub outfile: Option<String>,
 }
@@ -53,8 +53,8 @@ impl RunConfig {
 }
 
 impl BuildConfig {
-    pub fn entry(&self) -> &str {
-        self.entry.as_deref().unwrap_or("src/index.ts")
+    pub fn src(&self) -> &str {
+        self.src.as_deref().unwrap_or("src/index.ts")
     }
 
     pub fn outdir(&self) -> &str {
