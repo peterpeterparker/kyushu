@@ -22,11 +22,7 @@ use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 pub async fn dev(dev_config: &DevConfig, worker_config: &WorkerConfig) -> Result<()> {
-    // TODO: duplicate runner
-    let worker = config.worker.clone().unwrap_or_default();
-    // TODO: remove build config and wasm path
-    let wasm_path = worker.wasm();
-    let port = worker.port();
+    let port = dev_config.port();
 
     // TODO: not same as runner - we are not story the proxypre
     let instance_pre = Arc::new(RwLock::new(build_instance_pre(config.entry()).await?));
