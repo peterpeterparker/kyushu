@@ -1,5 +1,9 @@
 use serde::Deserialize;
 
+const DEFAULT_PORT: u16 = 5987;
+const DEFAULT_OUTPUT_DIR: &str = "worker";
+const DEFAULT_OUTPUT_FILE: &str = "__kyushu_worker.wasm";
+
 #[derive(Deserialize, Default, Clone)]
 pub struct KyuConfig {
     pub dev: Option<DevConfig>,
@@ -53,19 +57,19 @@ pub struct EnvConfig {
 
 impl DevConfig {
     pub fn port(&self) -> u16 {
-        self.port.unwrap_or(5987)
+        self.port.unwrap_or(DEFAULT_PORT)
     }
 }
 
 impl RunConfig {
-    pub fn wasm(&self) -> &str {
+    pub fn wasm(&self) -> String {
         self.wasm
-            .as_deref()
-            .unwrap_or("worker/__kyushu_worker.wasm")
+            .clone()
+            .unwrap_or(format!("{}/{}", DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_FILE))
     }
 
     pub fn port(&self) -> u16 {
-        self.port.unwrap_or(5987)
+        self.port.unwrap_or(DEFAULT_PORT)
     }
 }
 
@@ -77,11 +81,11 @@ impl InputConfig {
 
 impl OutputConfig {
     pub fn dir(&self) -> &str {
-        self.dir.as_deref().unwrap_or("worker")
+        self.dir.as_deref().unwrap_or(DEFAULT_OUTPUT_DIR)
     }
 
     pub fn file(&self) -> &str {
-        self.file.as_deref().unwrap_or("__kyushu_worker.wasm")
+        self.file.as_deref().unwrap_or(DEFAULT_OUTPUT_FILE)
     }
 
     pub fn worker_wasm(&self) -> String {
