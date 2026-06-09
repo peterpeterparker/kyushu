@@ -50,24 +50,7 @@ async fn handle_request(
             .build(),
     );
 
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    let req = store
-        .data_mut()
-        .http()
-        .new_incoming_request(Scheme::Http, req)?;
-    let out = store.data_mut().http().new_response_outparam(sender)?;
+    let proxy = pre.instantiate_async(&mut store).await?;
 
-    tokio::task::spawn(async move {
-        let proxy = pre.instantiate_async(&mut store).await?;
-        proxy
-            .wasi_http_incoming_handler()
-            .call_handle(&mut store, req, out)
-            .await
-    });
-
-    match receiver.await {
-        Ok(Ok(resp)) => Ok(resp),
-        Ok(Err(e)) => anyhow::bail!("handler error: {e:?}"),
-        Err(_) => anyhow::bail!("handler did not send a response"),
-    }
+    server::dispatch(proxy, store, req).await
 }
