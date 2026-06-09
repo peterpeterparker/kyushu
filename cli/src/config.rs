@@ -3,7 +3,8 @@ use serde::Deserialize;
 #[derive(Deserialize, Default, Clone)]
 pub struct KyuConfig {
     pub run: Option<RunConfig>,
-    pub build: Option<BuildConfig>,
+    pub src: Option<SourceConfig>,
+    pub out: Option<OutputConfig>,
     pub worker: Option<WorkerConfig>,
 }
 
@@ -14,8 +15,12 @@ pub struct RunConfig {
 }
 
 #[derive(Deserialize, Default, Clone)]
-pub struct BuildConfig {
+pub struct SourceConfig {
     pub src: Option<String>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+pub struct OutputConfig {
     pub outdir: Option<String>,
     pub outfile: Option<String>,
 }
@@ -52,11 +57,13 @@ impl RunConfig {
     }
 }
 
-impl BuildConfig {
+impl SourceConfig {
     pub fn src(&self) -> &str {
         self.src.as_deref().unwrap_or("src/index.ts")
     }
+}
 
+impl OutputConfig {
     pub fn outdir(&self) -> &str {
         self.outdir.as_deref().unwrap_or("worker")
     }
