@@ -4,6 +4,7 @@ use config::KyuConfig;
 
 mod builder;
 mod config;
+mod dev;
 mod javascript;
 mod runner;
 mod worker;
@@ -20,6 +21,11 @@ enum Cli {
     },
     /// Build the worker Wasm from JS/TS source
     Build {
+        #[arg()]
+        config: Option<String>,
+    },
+    /// Start a local development server with hot-reload
+    Dev {
         #[arg()]
         config: Option<String>,
     },
@@ -48,7 +54,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config_path = match &cli {
-        Cli::Run { config } | Cli::Build { config } => config.as_deref(),
+        Cli::Run { config } | Cli::Build { config } | Cli::Dev { config } => config.as_deref(),
     };
     let config = read_config(config_path)?;
 
@@ -64,6 +70,14 @@ async fn main() -> Result<()> {
             builder::build(
                 &config.input.unwrap_or_default(),
                 &config.output.unwrap_or_default(),
+            )
+            .await?;
+        }
+        Cli::Dev { .. } => {
+            dev::dev(
+                &config.dev.unwrap_or_default(),
+                &config.input.unwrap_or_default(),
+                &config.worker.unwrap_or_default(),
             )
             .await?;
         }

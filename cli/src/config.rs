@@ -2,10 +2,16 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Default, Clone)]
 pub struct KyuConfig {
+    pub dev: Option<DevConfig>,
     pub run: Option<RunConfig>,
     pub input: Option<InputConfig>,
     pub output: Option<OutputConfig>,
     pub worker: Option<WorkerConfig>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+pub struct DevConfig {
+    pub port: Option<u16>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -43,6 +49,12 @@ pub struct MountConfig {
 pub struct EnvConfig {
     pub key: String,
     pub value: String,
+}
+
+impl DevConfig {
+    pub fn port(&self) -> u16 {
+        self.port.unwrap_or(5987)
+    }
 }
 
 impl RunConfig {
