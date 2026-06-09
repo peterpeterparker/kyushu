@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Reference for kyu build and kyu run configuration.
+description: Reference for kyu build, kyu run, and kyu dev configuration.
 ---
 
 Kyushu works out of the box. Each command uses defaults but supports its own optional config file to override them.
@@ -63,3 +63,18 @@ writable = true
 key = "API_KEY"
 value = "secret"
 ```
+
+## Dev
+
+Controls how `kyu dev` serves your worker during development with live-reload.
+
+```toml
+[dev]
+port = 5987  # default
+```
+
+| Field      | Type   | Default | Description       |
+| ---------- | ------ | ------- | ----------------- |
+| `dev.port` | number | `5987`  | Port to listen on |
+
+A custom `[input]` or `[worker]` configuration can also be applied; the details are omitted for brevity but follow the same options documented above.
