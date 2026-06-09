@@ -33,6 +33,21 @@ kyu run
 kyu run path/to/kyushu.toml
 ```
 
+## kyu dev
+
+Start a local development server with live reload.
+
+```bash
+kyu dev [config]
+```
+
+If no config path is provided, defaults are used. Pass an explicit path to override.
+
+```bash
+kyu dev
+kyu dev path/to/kyushu.toml
+```
+
 ## kyu --version
 
 Print the installed CLI version.
