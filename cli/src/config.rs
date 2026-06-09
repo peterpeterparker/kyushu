@@ -16,6 +16,7 @@ pub struct KyuConfig {
 #[derive(Deserialize, Default, Clone)]
 pub struct DevConfig {
     pub port: Option<u16>,
+    pub watch: Option<bool>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -58,6 +59,10 @@ pub struct EnvConfig {
 impl DevConfig {
     pub fn port(&self) -> u16 {
         self.port.unwrap_or(DEFAULT_PORT)
+    }
+
+    pub fn watch(&self) -> bool {
+        self.watch.unwrap_or(true)
     }
 }
 
