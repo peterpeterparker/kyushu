@@ -56,8 +56,8 @@ export default {
 
 Mount a directory containing your static files into the sandbox.
 
-```toml title="kyushu.run.toml"
-[[mounts]]
+```toml title="kyushu.toml"
+[[worker.mounts]]
 host = "./dist"
 guest = "/"
 ```

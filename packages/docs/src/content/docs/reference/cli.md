@@ -15,7 +15,7 @@ If no config path is provided, defaults are used. Pass an explicit path to overr
 
 ```bash
 kyu build
-kyu build path/to/kyushu.build.toml
+kyu build path/to/kyushu.toml
 ```
 
 ## kyu run
@@ -30,7 +30,7 @@ If no config path is provided, defaults are used. Pass an explicit path to overr
 
 ```bash
 kyu run
-kyu run path/to/kyushu.run.toml
+kyu run path/to/kyushu.toml
 ```
 
 ## kyu --version

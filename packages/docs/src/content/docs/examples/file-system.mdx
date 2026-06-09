@@ -27,8 +27,8 @@ export default {
 
 By default, the sandbox has no access to the host filesystem. Mount a directory to expose it to your worker.
 
-```toml title="kyushu.run.toml"
-[[mounts]]
+```toml title="kyushu.toml"
+[[worker.mounts]]
 host = "."
 guest = "/"
 writable = true
@@ -38,6 +38,6 @@ writable = true
 Set `writable = true` to allow the worker to write files. Mounts are read-only by default.
 :::
 
-import TryIt from "../../../components/docs/try-it-with-config.mdx";
+import TryItWithConfig from "../../../components/docs/try-it-with-config.mdx";
 
-<TryIt config="kyushu.run.toml" />
+<TryItWithConfig />
