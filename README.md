@@ -127,10 +127,11 @@ export default {
 ```
 kyu build [config]   Bundle and pre-initialize a worker
 kyu run [config]     Run a built worker
+kyu dev [config]     Start a local development server with hot-reload
 kyu --version        Print the CLI version
 ```
 
-Both `build` and `run` accept an optional config file. Pass a path to override the defaults.
+All commands accept an optional config file. Pass a path to override the defaults.
 
 ## Config reference
 
@@ -185,6 +186,21 @@ value = "secret"
 | `worker.env`               | array  | —                             | Environment variables to expose to the worker |
 | `worker.env[].key`         | string | —                             | Environment variable name                     |
 | `worker.env[].value`       | string | —                             | Environment variable value                    |
+
+### Dev
+
+Configure the development server.
+
+```toml
+[dev]
+port = 5987  # default
+```
+
+| Field      | Type   | Default | Description       |
+| ---------- | ------ | ------- | ----------------- |
+| `dev.port` | number | `5987`  | Port to listen on |
+
+A custom `[input]` or `[worker]` configuration can also be applied; the details are omitted for brevity but follow the same options documented above.
 
 ## Security
 
