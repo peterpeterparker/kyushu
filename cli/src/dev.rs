@@ -1,5 +1,5 @@
 use crate::builder::WORKER_TEMPLATE;
-use crate::config::DevConfig;
+use crate::config::{DevConfig, WorkerConfig};
 use crate::javascript::bundle;
 use crate::worker::context::WorkerContext;
 use crate::worker::linker::WorkerLinker;
@@ -21,7 +21,7 @@ use wasmtime_wasi_http::p2::bindings::ProxyIndices;
 use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
-pub async fn dev(config: DevConfig) -> Result<()> {
+pub async fn dev(dev_config: &DevConfig, worker_config: &WorkerConfig) -> Result<()> {
     // TODO: duplicate runner
     let worker = config.worker.clone().unwrap_or_default();
     // TODO: remove build config and wasm path

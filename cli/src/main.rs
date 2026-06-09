@@ -73,7 +73,12 @@ async fn main() -> Result<()> {
         Cli::Dev {
             config: config_path,
         } => {
-            dev::dev(read_config(config_path.as_deref())?).await?;
+            let config = read_config(config_path.as_deref())?;
+            dev::dev(
+                &config.dev.unwrap_or_default(),
+                &config.worker.unwrap_or_default(),
+            )
+            .await?;
         }
     }
 
