@@ -1,1 +1,2 @@
+[build]
 entry = "src/server.ts"
