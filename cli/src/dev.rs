@@ -61,7 +61,6 @@ async fn build_instance_pre(input_config: &InputConfig) -> Result<InstancePre<Wo
         .with_bundle(bundle_str)?
         .build();
 
-    // TODO: refactor extract builder impl and template
     let component = Component::new(&engine, WORKER_TEMPLATE)
         .map_err(|e| anyhow::anyhow!("failed to load worker template: {e:?}"))?;
 
@@ -147,24 +146,5 @@ async fn handle_request(
         .load(&mut store, &instance)
         .map_err(|e| anyhow::anyhow!("failed to load Proxy from instance: {e:?}"))?;
 
-    // TODO: same as in runner
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    let req = store
-        .data_mut()
-        .http()
-        .new_incoming_request(Scheme::Http, req)?;
-    let out = store.data_mut().http().new_response_outparam(sender)?;
-
-    tokio::task::spawn(async move {
-        proxy
-            .wasi_http_incoming_handler()
-            .call_handle(&mut store, req, out)
-            .await
-    });
-
-    match receiver.await {
-        Ok(Ok(resp)) => Ok(resp),
-        Ok(Err(e)) => anyhow::bail!("handler error: {e:?}"),
-        Err(_) => anyhow::bail!("handler did not send a response"),
-    }
+    server::dispatch(proxy, store, req).await
 }
