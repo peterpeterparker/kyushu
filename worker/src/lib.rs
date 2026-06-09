@@ -18,7 +18,7 @@ impl bindings::Guest for Worker {
         setup::initialize();
     }
 
-    fn get_version() -> String {
+    fn kyu_version() -> String {
         env!("CARGO_PKG_VERSION").to_string()
     }
 }

@@ -28,5 +28,5 @@ world worker {
   export kyu-initialize: func();
 
   // Exposes the worker version, baked in at compile time via CARGO_PKG_VERSION.
-  export get-version: func() -> string;
+  export kyu-version: func() -> string;
 }
