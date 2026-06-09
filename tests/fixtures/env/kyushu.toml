@@ -3,9 +3,10 @@ src = "fixtures/env/index.ts"
 
 [output]
 dir = "dist"
+file = "__kyushu_worker_env.wasm"
 
 [run]
-wasm = "dist/__kyushu_worker.wasm"
+wasm = "dist/__kyushu_worker_env.wasm"
 port = 5987
 
 [[worker.env]]

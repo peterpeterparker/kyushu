@@ -6,9 +6,11 @@ import { waitForServer } from "./utils/server.utils";
 const PORT = 5987;
 const BASE_URL = `http://localhost:${PORT}`;
 const CONFIG = "fixtures/env/kyushu.toml";
-const KYU = "../target/release/kyu";
 
-describe("env fixture", () => {
+declare const __KYU_BUILD__: string;
+const KYU = `../target/${__KYU_BUILD__}/kyu`;
+
+describe("env", () => {
   let runner: ChildProcessWithoutNullStreams;
 
   beforeAll(async () => {
