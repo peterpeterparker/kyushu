@@ -141,17 +141,19 @@ The available options and their defaults:
 Configure the build step.
 
 ```toml
-[build]
-entry = "src/index.ts"            # default
-outdir = "worker"                 # default
-outfile = "__kyushu_worker.wasm"  # default
+[input]
+src = "src/index.ts"           # default
+
+[output]
+dir = "worker"                 # default
+file = "__kyushu_worker.wasm"  # default
 ```
 
-| Field     | Type   | Default                | Description                                       |
-| --------- | ------ | ---------------------- | ------------------------------------------------- |
-| `entry`   | string | `src/index.ts`         | Path to your TypeScript or JavaScript entry point |
-| `outdir`  | string | `worker`               | Output directory for the built worker             |
-| `outfile` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
+| Field         | Type   | Default                | Description                                       |
+| ------------- | ------ | ---------------------- | ------------------------------------------------- |
+| `input.src`   | string | `src/index.ts`         | Path to your TypeScript or JavaScript entry point |
+| `output.dir`  | string | `worker`               | Output directory for the built worker             |
+| `output.file` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
 
 ### Run
 
