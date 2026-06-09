@@ -4,22 +4,22 @@ use serde::Deserialize;
 pub struct KyuConfig {
     pub run: Option<RunConfig>,
     pub build: Option<BuildConfig>,
+    pub worker: Option<WorkerConfig>,
 }
 
 #[derive(Deserialize, Default, Clone)]
-pub struct RunConfig {
-    pub worker: Option<WorkerConfig>,
+pub struct WorkerConfig {
     pub mounts: Option<Vec<MountConfig>>,
     pub env: Option<Vec<EnvConfig>>,
 }
 
 #[derive(Deserialize, Default, Clone)]
-pub struct WorkerConfig {
+pub struct RunConfig {
     pub wasm: Option<String>,
     pub port: Option<u16>,
 }
 
-impl WorkerConfig {
+impl RunConfig {
     pub fn wasm(&self) -> &str {
         self.wasm
             .as_deref()
