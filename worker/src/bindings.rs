@@ -10,6 +10,13 @@ pub unsafe fn _export_wizer_initialize_cabi<T: Guest>() {
 }
 #[doc(hidden)]
 #[allow(non_snake_case)]
+pub unsafe fn _export_kyu_initialize_cabi<T: Guest>() {
+    #[cfg(target_arch = "wasm32")]
+    _rt::run_ctors_once();
+    T::kyu_initialize();
+}
+#[doc(hidden)]
+#[allow(non_snake_case)]
 pub unsafe fn _export_get_version_cabi<T: Guest>() -> *mut u8 {
     #[cfg(target_arch = "wasm32")]
     _rt::run_ctors_once();
@@ -37,6 +44,8 @@ pub unsafe fn __post_return_get_version<T: Guest>(arg0: *mut u8) {
 pub trait Guest {
     /// Called by Wizer to pre-initialize the worker with the JS bundle
     fn wizer_initialize() -> ();
+    /// Called by kyu dev to initialize the JS runtime with the current bundle.
+    fn kyu_initialize() -> ();
     /// Exposes the worker version, baked in at compile time via CARGO_PKG_VERSION.
     fn get_version() -> _rt::String;
 }
@@ -46,9 +55,11 @@ macro_rules! __export_world_worker_cabi {
         const _ : () = { #[unsafe (export_name = "wizer-initialize")] unsafe extern "C"
         fn export_wizer_initialize() { unsafe { $($path_to_types)*::
         _export_wizer_initialize_cabi::<$ty > () } } #[unsafe (export_name =
-        "get-version")] unsafe extern "C" fn export_get_version() -> * mut u8 { unsafe {
-        $($path_to_types)*:: _export_get_version_cabi::<$ty > () } } #[unsafe
-        (export_name = "cabi_post_get-version")] unsafe extern "C" fn
+        "kyu-initialize")] unsafe extern "C" fn export_kyu_initialize() { unsafe {
+        $($path_to_types)*:: _export_kyu_initialize_cabi::<$ty > () } } #[unsafe
+        (export_name = "get-version")] unsafe extern "C" fn export_get_version() -> * mut
+        u8 { unsafe { $($path_to_types)*:: _export_get_version_cabi::<$ty > () } }
+        #[unsafe (export_name = "cabi_post_get-version")] unsafe extern "C" fn
         _post_return_get_version(arg0 : * mut u8,) { unsafe { $($path_to_types)*::
         __post_return_get_version::<$ty > (arg0) } } };
     };
@@ -8780,8 +8791,8 @@ pub(crate) use __export_worker_impl as export;
 #[unsafe(link_section = "component-type:wit-bindgen:0.41.0:kyushu:worker:worker:encoded world")]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7147] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xee6\x01A\x02\x01A)\x01\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7166] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x817\x01A\x02\x01A*\x01\
 B\x02\x01@\0\0s\x04\0\x0aget-bundle\x01\0\x03\0\x14kyushu:worker/bundle\x05\0\x01\
 B\x0a\x04\0\x08pollable\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[meth\
 od]pollable.ready\x01\x02\x01@\x01\x04self\x01\x01\0\x04\0\x16[method]pollable.b\
@@ -8917,14 +8928,14 @@ h\x07\x01k\x1b\x01@\x01\x03err\x8b\x01\0\x8c\x01\x04\0\x0fhttp-error-code\x01\x8
 \x18future-incoming-response\x03\0\x04\x02\x03\x02\x01\x13\x04\0\x0aerror-code\x03\
 \0\x06\x01i\x01\x01i\x03\x01k\x09\x01i\x05\x01j\x01\x0b\x01\x07\x01@\x02\x07requ\
 est\x08\x07options\x0a\0\x0c\x04\0\x06handle\x01\x0d\x03\0!wasi:http/outgoing-ha\
-ndler@0.2.11\x05\x14\x01@\0\x01\0\x04\0\x10wizer-initialize\x01\x15\x01@\0\0s\x04\
-\0\x0bget-version\x01\x16\x02\x03\0\x0a\x10incoming-request\x02\x03\0\x0a\x11res\
-ponse-outparam\x01B\x08\x02\x03\x02\x01\x17\x04\0\x10incoming-request\x03\0\0\x02\
-\x03\x02\x01\x18\x04\0\x11response-outparam\x03\0\x02\x01i\x01\x01i\x03\x01@\x02\
-\x07request\x04\x0cresponse-out\x05\x01\0\x04\0\x06handle\x01\x06\x04\0!wasi:htt\
-p/incoming-handler@0.2.11\x05\x19\x04\0\x14kyushu:worker/worker\x04\0\x0b\x0c\x01\
-\0\x06worker\x03\0\0\0G\x09producers\x01\x0cprocessed-by\x02\x0dwit-component\x07\
-0.227.1\x10wit-bindgen-rust\x060.41.0";
+ndler@0.2.11\x05\x14\x01@\0\x01\0\x04\0\x10wizer-initialize\x01\x15\x04\0\x0ekyu\
+-initialize\x01\x15\x01@\0\0s\x04\0\x0bget-version\x01\x16\x02\x03\0\x0a\x10inco\
+ming-request\x02\x03\0\x0a\x11response-outparam\x01B\x08\x02\x03\x02\x01\x17\x04\
+\0\x10incoming-request\x03\0\0\x02\x03\x02\x01\x18\x04\0\x11response-outparam\x03\
+\0\x02\x01i\x01\x01i\x03\x01@\x02\x07request\x04\x0cresponse-out\x05\x01\0\x04\0\
+\x06handle\x01\x06\x04\0!wasi:http/incoming-handler@0.2.11\x05\x19\x04\0\x14kyus\
+hu:worker/worker\x04\0\x0b\x0c\x01\0\x06worker\x03\0\0\0G\x09producers\x01\x0cpr\
+ocessed-by\x02\x0dwit-component\x070.227.1\x10wit-bindgen-rust\x060.41.0";
 #[inline(never)]
 #[doc(hidden)]
 pub fn __link_custom_section_describing_imports() {
