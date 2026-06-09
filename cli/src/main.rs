@@ -47,21 +47,20 @@ fn read_config(config_path: Option<&str>) -> Result<KyuConfig> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    let config_path = match &cli {
+        Cli::Run { config } | Cli::Build { config } => config.as_deref(),
+    };
+    let config = read_config(config_path)?;
+
     match cli {
-        Cli::Run {
-            config: config_path,
-        } => {
-            let config = read_config(config_path.as_deref())?;
+        Cli::Run { .. } => {
             runner::run(
                 &config.run.unwrap_or_default(),
                 &config.worker.unwrap_or_default(),
             )
             .await?;
         }
-        Cli::Build {
-            config: config_path,
-        } => {
-            let config = read_config(config_path.as_deref())?;
+        Cli::Build { .. } => {
             builder::build(&config.build.unwrap_or_default()).await?;
         }
     }
