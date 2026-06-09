@@ -23,6 +23,9 @@ jobs:
           cp out/kyu target/release/
           chmod +x target/release/kyu
 
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
       - name: Run integration tests
         run: pnpm test
         working-directory: tests
