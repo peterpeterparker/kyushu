@@ -8,15 +8,36 @@ pub struct KyuConfig {
 }
 
 #[derive(Deserialize, Default, Clone)]
+pub struct RunConfig {
+    pub wasm: Option<String>,
+    pub port: Option<u16>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+pub struct BuildConfig {
+    pub entry: Option<String>,
+    pub outdir: Option<String>,
+    pub outfile: Option<String>,
+}
+
+#[derive(Deserialize, Default, Clone)]
 pub struct WorkerConfig {
     pub mounts: Option<Vec<MountConfig>>,
     pub env: Option<Vec<EnvConfig>>,
 }
 
-#[derive(Deserialize, Default, Clone)]
-pub struct RunConfig {
-    pub wasm: Option<String>,
-    pub port: Option<u16>,
+#[derive(Deserialize, Clone)]
+pub struct MountConfig {
+    pub host: String,
+    pub guest: String,
+    #[serde(default)]
+    pub writable: bool,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct EnvConfig {
+    pub key: String,
+    pub value: String,
 }
 
 impl RunConfig {
@@ -29,13 +50,6 @@ impl RunConfig {
     pub fn port(&self) -> u16 {
         self.port.unwrap_or(5987)
     }
-}
-
-#[derive(Deserialize, Default, Clone)]
-pub struct BuildConfig {
-    pub entry: Option<String>,
-    pub outdir: Option<String>,
-    pub outfile: Option<String>,
 }
 
 impl BuildConfig {
@@ -54,18 +68,4 @@ impl BuildConfig {
     pub fn worker_wasm(&self) -> String {
         format!("{}/{}", self.outdir(), self.outfile())
     }
-}
-
-#[derive(Deserialize, Clone)]
-pub struct MountConfig {
-    pub host: String,
-    pub guest: String,
-    #[serde(default)]
-    pub writable: bool,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct EnvConfig {
-    pub key: String,
-    pub value: String,
 }
