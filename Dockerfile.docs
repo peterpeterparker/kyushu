@@ -24,7 +24,7 @@ RUN npm install -g pnpm@$(node -e "console.log(require('./package.json').package
 
 # kyu CLI
 RUN curl --proto '=https' --tlsv1.2 -LsSf https://github.com/peterpeterparker/kyushu/releases/download/cli/v0.0.6/kyushu-cli-installer.sh | sh
-ENV PATH="/root/.cargo/bin:${PATH}"
+ENV PATH="/root/.kyu/bin:${PATH}"
 
 WORKDIR /app
 COPY . .
