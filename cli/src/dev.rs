@@ -1,5 +1,5 @@
 use crate::builder::WORKER_TEMPLATE;
-use crate::config::{DevConfig, WorkerConfig};
+use crate::config::{DevConfig, InputConfig, WorkerConfig};
 use crate::javascript::bundle;
 use crate::worker::context::WorkerContext;
 use crate::worker::linker::WorkerLinker;
@@ -21,17 +21,24 @@ use wasmtime_wasi_http::p2::bindings::ProxyIndices;
 use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
 use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
-pub async fn dev(dev_config: &DevConfig, worker_config: &WorkerConfig) -> Result<()> {
+pub async fn dev(
+    dev_config: &DevConfig,
+    input_config: &InputConfig,
+    worker_config: &WorkerConfig,
+) -> Result<()> {
     let port = dev_config.port();
 
-    // TODO: not same as runner - we are not story the proxypre
-    let instance_pre = Arc::new(RwLock::new(build_instance_pre(config.entry()).await?));
+    // Unlike the runner which loads a pre-built Wizer snapshot via ProxyPre,
+    // dev mode skips Wizer entirely and holds a raw InstancePre. wizer-initialize
+    // is called fresh on each request to initialize the JS runtime with the current bundle.
+    // TODO: duplicate wizer-initialize to a custom function
+    let instance_pre = Arc::new(RwLock::new(build_instance_pre(input_config).await?));
 
     // Live reload watcher
     let instance_pre_watcher = instance_pre.clone();
-    let config_watcher = config.clone();
+    let config = input_config.clone();
     tokio::spawn(async move {
-        if let Err(e) = watch(config_watcher, instance_pre_watcher).await {
+        if let Err(e) = watch(config, instance_pre_watcher).await {
             eprintln!("Watcher error: {e:?}");
         }
     });
@@ -44,7 +51,7 @@ pub async fn dev(dev_config: &DevConfig, worker_config: &WorkerConfig) -> Result
     loop {
         let (stream, addr) = listener.accept().await?;
         let instance_pre = instance_pre.clone();
-        let config = config.clone();
+        let config = worker_config.clone();
 
         tokio::spawn(async move {
             if let Err(e) = http1::Builder::new()
@@ -65,9 +72,11 @@ pub async fn dev(dev_config: &DevConfig, worker_config: &WorkerConfig) -> Result
     }
 }
 
-async fn build_instance_pre(entry: &str) -> Result<InstancePre<WorkerState>> {
-    println!("Bundling {}...", entry);
-    let bundle_str = bundle(entry).await?;
+async fn build_instance_pre(input_config: &InputConfig) -> Result<InstancePre<WorkerState>> {
+    let src = input_config.src();
+
+    println!("Bundling {}...", src);
+    let bundle_str = bundle(src).await?;
 
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
@@ -85,10 +94,10 @@ async fn build_instance_pre(entry: &str) -> Result<InstancePre<WorkerState>> {
 }
 
 async fn watch(
-    config: DevConfig,
+    input_config: InputConfig,
     instance_pre: Arc<RwLock<InstancePre<WorkerState>>>,
 ) -> Result<()> {
-    let src_dir = Path::new(config.entry())
+    let src_dir = Path::new(input_config.src())
         .parent()
         .unwrap_or(Path::new("src"))
         .to_path_buf();
@@ -110,7 +119,7 @@ async fn watch(
 
     while let Some(()) = rx.recv().await {
         println!("Change detected, reloading...");
-        match build_instance_pre(config.entry()).await {
+        match build_instance_pre(&input_config).await {
             Ok(new_pre) => {
                 *instance_pre.write().await = new_pre;
                 println!("Worker reloaded.");
@@ -124,7 +133,7 @@ async fn watch(
 
 async fn handle_request(
     instance_pre: Arc<RwLock<InstancePre<WorkerState>>>,
-    config: DevConfig,
+    config: WorkerConfig,
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<HyperOutgoingBody>> {
     let instance_pre = instance_pre.read().await.clone();
