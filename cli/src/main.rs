@@ -62,8 +62,8 @@ async fn main() -> Result<()> {
         }
         Cli::Build { .. } => {
             builder::build(
-                &config.src.unwrap_or_default(),
-                &config.out.unwrap_or_default(),
+                &config.input.unwrap_or_default(),
+                &config.output.unwrap_or_default(),
             )
             .await?;
         }

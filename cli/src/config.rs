@@ -3,8 +3,8 @@ use serde::Deserialize;
 #[derive(Deserialize, Default, Clone)]
 pub struct KyuConfig {
     pub run: Option<RunConfig>,
-    pub src: Option<SourceConfig>,
-    pub out: Option<OutputConfig>,
+    pub input: Option<InputConfig>,
+    pub output: Option<OutputConfig>,
     pub worker: Option<WorkerConfig>,
 }
 
@@ -15,7 +15,7 @@ pub struct RunConfig {
 }
 
 #[derive(Deserialize, Default, Clone)]
-pub struct SourceConfig {
+pub struct InputConfig {
     pub src: Option<String>,
 }
 
@@ -57,7 +57,7 @@ impl RunConfig {
     }
 }
 
-impl SourceConfig {
+impl InputConfig {
     pub fn src(&self) -> &str {
         self.src.as_deref().unwrap_or("src/index.ts")
     }

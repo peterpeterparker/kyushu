@@ -2,7 +2,7 @@ use anyhow::Result;
 use wasmtime::Store;
 use wasmtime_wizer::Wizer;
 
-use crate::config::{OutputConfig, SourceConfig};
+use crate::config::{InputConfig, OutputConfig};
 use crate::javascript::bundle;
 use crate::worker::context::WorkerContext;
 use crate::worker::linker::WorkerLinker;
@@ -22,19 +22,19 @@ static WORKER_TEMPLATE: &[u8] =
 static WORKER_TEMPLATE: &[u8] =
     include_bytes!("../../target/wasm32-wasip2/debug/kyushu_worker.wasm");
 
-pub async fn build(source_config: &SourceConfig, output_config: &OutputConfig) -> Result<()> {
+pub async fn build(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
     WorkerVersion::new()
         .with_bytes(WORKER_TEMPLATE)
         .print()
         .await?;
 
-    bundle_js(source_config, output_config).await?;
+    bundle_js(input_config, output_config).await?;
 
     Ok(())
 }
 
-async fn bundle_js(source_config: &SourceConfig, output_config: &OutputConfig) -> Result<()> {
-    let src = source_config.src();
+async fn bundle_js(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
+    let src = input_config.src();
     let outdir = output_config.outdir();
     let worker_wasm = output_config.worker_wasm();
 
