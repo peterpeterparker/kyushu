@@ -1,5 +1,5 @@
 [input]
-src = "tests/fixtures/env/index.ts"
+src = "fixtures/env/index.ts"
 
 [output]
 dir = "dist"
