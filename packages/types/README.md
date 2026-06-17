@@ -4,7 +4,7 @@
 [npm-badge]: https://img.shields.io/npm/v/kyushu-types
 [npm-badge-url]: https://www.npmjs.com/package/kyushu-types
 [npm-license]: https://img.shields.io/npm/l/kyushu-types
-[npm-license-url]: https://github.com/junobuild/juno-js/blob/main/LICENSE
+[npm-license-url]: https://github.com/peterpeterparker/kyushu/blob/main/packages/types/LICENSE
 
 # Kyushu Types
 
