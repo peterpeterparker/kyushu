@@ -48,8 +48,10 @@ fn generate_assets_module(assets: &[Asset]) -> String {
     let entries: String = assets
         .iter()
         .map(|asset| {
-            let bytes: String = asset
-                .bytes
+            let bytes = std::fs::read(&asset.src_path)
+                .unwrap_or_else(|e| panic!("Failed to read asset '{}': {e}", asset.src_path));
+
+            let bytes_str = bytes
                 .iter()
                 .map(|b| b.to_string())
                 .collect::<Vec<String>>()
@@ -62,7 +64,7 @@ fn generate_assets_module(assets: &[Asset]) -> String {
 
             format!(
                 "\"{}\": {{ bytes: new Uint8Array([{}]), mimeType: {} }}",
-                asset.path, bytes, mime
+                asset.path, bytes_str, mime
             )
         })
         .collect::<Vec<_>>()

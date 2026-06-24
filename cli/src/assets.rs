@@ -4,23 +4,23 @@ use std::path::Path;
 use walkdir::WalkDir;
 
 pub struct Asset {
+    pub src_path: String,
     pub path: String,
-    pub bytes: Vec<u8>,
     pub mime_type: Option<String>,
 }
 
 impl Asset {
     pub fn from_path(base: &Path, abs_path: &Path) -> Result<Self> {
+        let src_path = abs_path.to_string_lossy().into_owned();
+
         let rel_path = abs_path.strip_prefix(base)?;
         let path = format!("/{}", rel_path.to_string_lossy().replace('\\', "/"));
-
-        let bytes = std::fs::read(abs_path)?;
 
         let mime_type = from_path(abs_path).first().map(|m| m.to_string());
 
         Ok(Self {
+            src_path,
             path,
-            bytes,
             mime_type,
         })
     }

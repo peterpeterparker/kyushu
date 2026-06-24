@@ -118,8 +118,8 @@ mod tests {
 
     fn make_worker_assets() -> WorkerAssets {
         WorkerAssets::from(vec![Asset {
+            src_path: "/tmp/index.html".to_string(),
             path: "/index.html".to_string(),
-            bytes: b"<html>".to_vec(),
             mime_type: Some("text/html".to_string()),
         }])
     }

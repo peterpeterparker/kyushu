@@ -108,4 +108,12 @@ impl AssetsConfig {
     pub fn dir(&self) -> &str {
         &self.dir
     }
+
+    pub fn to_mount(&self) -> MountConfig {
+        MountConfig {
+            host: self.dir.clone(),
+            guest: self.dir.clone(),
+            writable: false,
+        }
+    }
 }

@@ -16,11 +16,11 @@ impl WorkerAssets {
             .iter()
             .map(|asset| {
                 Val::Record(vec![
-                    ("path".to_string(), Val::String(asset.path.clone().into())),
                     (
-                        "bytes".to_string(),
-                        Val::List(asset.bytes.iter().map(|bytes| Val::U8(*bytes)).collect()),
+                        "src-path".to_string(),
+                        Val::String(asset.src_path.clone().into()),
                     ),
+                    ("path".to_string(), Val::String(asset.path.clone().into())),
                     (
                         "mime-type".to_string(),
                         Val::Option(
@@ -43,10 +43,10 @@ mod tests {
     use super::*;
     use crate::assets::Asset;
 
-    fn make_asset(path: &str, bytes: Vec<u8>, mime_type: Option<&str>) -> Asset {
+    fn make_asset(src_path: &str, path: &str, mime_type: Option<&str>) -> Asset {
         Asset {
+            src_path: src_path.to_string(),
             path: path.to_string(),
-            bytes,
             mime_type: mime_type.map(|m| m.to_string()),
         }
     }
@@ -61,8 +61,8 @@ mod tests {
     #[test]
     fn test_to_val_is_option_of_list() {
         let assets = WorkerAssets::from(vec![make_asset(
+            "/tmp/index.html",
             "/index.html",
-            b"<html>".to_vec(),
             Some("text/html"),
         )]);
         let val = assets.to_val();
@@ -75,12 +75,8 @@ mod tests {
     #[test]
     fn test_to_val_list_length() {
         let assets = WorkerAssets::from(vec![
-            make_asset("/index.html", b"<html>".to_vec(), Some("text/html")),
-            make_asset(
-                "/app.js",
-                b"console.log()".to_vec(),
-                Some("application/javascript"),
-            ),
+            make_asset("/tmp/index.html", "/index.html", Some("text/html")),
+            make_asset("/tmp/app.js", "/app.js", Some("application/javascript")),
         ]);
         match assets.to_val() {
             Val::Option(Some(inner)) => match *inner {
@@ -93,7 +89,7 @@ mod tests {
 
     #[test]
     fn test_from_vec() {
-        let assets = WorkerAssets::from(vec![make_asset("/index.html", vec![], None)]);
+        let assets = WorkerAssets::from(vec![make_asset("/tmp/index.html", "/index.html", None)]);
         assert_eq!(assets.0.len(), 1);
     }
 }

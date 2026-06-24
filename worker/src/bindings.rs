@@ -88,10 +88,11 @@ pub mod kyushu {
             /// server without IO interactions.
             #[derive(Clone)]
             pub struct Asset {
+                /// The absolute filesystem path used by the worker to load the file bytes during pre-initialization.
+                pub src_path: _rt::String,
                 /// The asset's URL path normalized with `/`-prefix
                 /// e.g. `/index.html` or `/images/hello.png`
                 pub path: _rt::String,
-                pub bytes: _rt::Vec<u8>,
                 pub mime_type: Option<_rt::String>,
             }
             impl ::core::fmt::Debug for Asset {
@@ -100,8 +101,8 @@ pub mod kyushu {
                     f: &mut ::core::fmt::Formatter<'_>,
                 ) -> ::core::fmt::Result {
                     f.debug_struct("Asset")
+                        .field("src-path", &self.src_path)
                         .field("path", &self.path)
-                        .field("bytes", &self.bytes)
                         .field("mime-type", &self.mime_type)
                         .finish()
                 }
@@ -204,14 +205,19 @@ pub mod kyushu {
                                             .add(3 * ::core::mem::size_of::<*const u8>())
                                             .cast::<usize>();
                                         let len10 = l9;
+                                        let bytes10 = _rt::Vec::from_raw_parts(
+                                            l8.cast(),
+                                            len10,
+                                            len10,
+                                        );
                                         let l11 = i32::from(
                                             *base
                                                 .add(4 * ::core::mem::size_of::<*const u8>())
                                                 .cast::<u8>(),
                                         );
                                         Asset {
-                                            path: _rt::string_lift(bytes7),
-                                            bytes: _rt::Vec::from_raw_parts(l8.cast(), len10, len10),
+                                            src_path: _rt::string_lift(bytes7),
+                                            path: _rt::string_lift(bytes10),
                                             mime_type: match l11 {
                                                 0 => None,
                                                 1 => {
@@ -8919,77 +8925,77 @@ pub(crate) use __export_worker_impl as export;
 #[allow(clippy::octal_escapes)]
 pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7236] = *b"\
 \0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xc77\x01A\x02\x01A*\x01\
-B\x0a\x01p}\x01ks\x01r\x03\x04paths\x05bytes\0\x09mime-type\x01\x04\0\x05asset\x03\
-\0\x02\x01@\0\0s\x04\0\x0aget-bundle\x01\x04\x01p\x03\x01k\x05\x01@\0\0\x06\x04\0\
-\x0aget-assets\x01\x07\x03\0\x14kyushu:worker/bundle\x05\0\x01B\x0a\x04\0\x08pol\
-lable\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\
-\x02\x01@\x01\x04self\x01\x01\0\x04\0\x16[method]pollable.block\x01\x03\x01p\x01\
-\x01py\x01@\x01\x02in\x04\0\x05\x04\0\x04poll\x01\x06\x03\0\x13wasi:io/poll@0.2.\
-11\x05\x01\x02\x03\0\x01\x08pollable\x01B\x0f\x02\x03\x02\x01\x02\x04\0\x08polla\
-ble\x03\0\0\x01w\x04\0\x07instant\x03\0\x02\x01w\x04\0\x08duration\x03\0\x04\x01\
-@\0\0\x03\x04\0\x03now\x01\x06\x01@\0\0\x05\x04\0\x0aresolution\x01\x07\x01i\x01\
-\x01@\x01\x04when\x03\0\x08\x04\0\x11subscribe-instant\x01\x09\x01@\x01\x04when\x05\
-\0\x08\x04\0\x12subscribe-duration\x01\x0a\x03\0\"wasi:clocks/monotonic-clock@0.\
-2.11\x05\x03\x01B\x05\x01r\x02\x07secondsw\x0bnanosecondsy\x04\0\x08datetime\x03\
-\0\0\x01@\0\0\x01\x04\0\x03now\x01\x02\x04\0\x0aresolution\x01\x02\x03\0\x1dwasi\
-:clocks/wall-clock@0.2.11\x05\x04\x01B\x05\x01p}\x01@\x01\x03lenw\0\0\x04\0\x10g\
-et-random-bytes\x01\x01\x01@\0\0w\x04\0\x0eget-random-u64\x01\x02\x03\0\x19wasi:\
-random/random@0.2.11\x05\x05\x01B\x04\x04\0\x05error\x03\x01\x01h\0\x01@\x01\x04\
-self\x01\0s\x04\0\x1d[method]error.to-debug-string\x01\x02\x03\0\x14wasi:io/erro\
-r@0.2.11\x05\x06\x02\x03\0\x05\x05error\x01B(\x02\x03\x02\x01\x07\x04\0\x05error\
-\x03\0\0\x02\x03\x02\x01\x02\x04\0\x08pollable\x03\0\x02\x01i\x01\x01q\x02\x15la\
-st-operation-failed\x01\x04\0\x06closed\0\0\x04\0\x0cstream-error\x03\0\x05\x04\0\
-\x0cinput-stream\x03\x01\x04\0\x0doutput-stream\x03\x01\x01h\x07\x01p}\x01j\x01\x0a\
-\x01\x06\x01@\x02\x04self\x09\x03lenw\0\x0b\x04\0\x19[method]input-stream.read\x01\
-\x0c\x04\0\"[method]input-stream.blocking-read\x01\x0c\x01j\x01w\x01\x06\x01@\x02\
-\x04self\x09\x03lenw\0\x0d\x04\0\x19[method]input-stream.skip\x01\x0e\x04\0\"[me\
-thod]input-stream.blocking-skip\x01\x0e\x01i\x03\x01@\x01\x04self\x09\0\x0f\x04\0\
-\x1e[method]input-stream.subscribe\x01\x10\x01h\x08\x01@\x01\x04self\x11\0\x0d\x04\
-\0![method]output-stream.check-write\x01\x12\x01j\0\x01\x06\x01@\x02\x04self\x11\
-\x08contents\x0a\0\x13\x04\0\x1b[method]output-stream.write\x01\x14\x04\0.[metho\
-d]output-stream.blocking-write-and-flush\x01\x14\x01@\x01\x04self\x11\0\x13\x04\0\
-\x1b[method]output-stream.flush\x01\x15\x04\0$[method]output-stream.blocking-flu\
-sh\x01\x15\x01@\x01\x04self\x11\0\x0f\x04\0\x1f[method]output-stream.subscribe\x01\
-\x16\x01@\x02\x04self\x11\x03lenw\0\x13\x04\0\"[method]output-stream.write-zeroe\
-s\x01\x17\x04\05[method]output-stream.blocking-write-zeroes-and-flush\x01\x17\x01\
-@\x03\x04self\x11\x03src\x09\x03lenw\0\x0d\x04\0\x1c[method]output-stream.splice\
-\x01\x18\x04\0%[method]output-stream.blocking-splice\x01\x18\x03\0\x16wasi:io/st\
-reams@0.2.11\x05\x08\x02\x03\0\x06\x0doutput-stream\x01B\x05\x02\x03\x02\x01\x09\
-\x04\0\x0doutput-stream\x03\0\0\x01i\x01\x01@\0\0\x02\x04\0\x0aget-stdout\x01\x03\
-\x03\0\x16wasi:cli/stdout@0.2.11\x05\x0a\x01B\x05\x02\x03\x02\x01\x09\x04\0\x0do\
-utput-stream\x03\0\0\x01i\x01\x01@\0\0\x02\x04\0\x0aget-stderr\x01\x03\x03\0\x16\
-wasi:cli/stderr@0.2.11\x05\x0b\x02\x03\0\x06\x0cinput-stream\x01B\x05\x02\x03\x02\
-\x01\x0c\x04\0\x0cinput-stream\x03\0\0\x01i\x01\x01@\0\0\x02\x04\0\x09get-stdin\x01\
-\x03\x03\0\x15wasi:cli/stdin@0.2.11\x05\x0d\x02\x03\0\x02\x08duration\x01B\xc1\x01\
-\x02\x03\x02\x01\x0e\x04\0\x08duration\x03\0\0\x02\x03\x02\x01\x0c\x04\0\x0cinpu\
-t-stream\x03\0\x02\x02\x03\x02\x01\x09\x04\0\x0doutput-stream\x03\0\x04\x02\x03\x02\
-\x01\x07\x04\0\x08io-error\x03\0\x06\x02\x03\x02\x01\x02\x04\0\x08pollable\x03\0\
-\x08\x01q\x0a\x03get\0\0\x04head\0\0\x04post\0\0\x03put\0\0\x06delete\0\0\x07con\
-nect\0\0\x07options\0\0\x05trace\0\0\x05patch\0\0\x05other\x01s\0\x04\0\x06metho\
-d\x03\0\x0a\x01q\x03\x04HTTP\0\0\x05HTTPS\0\0\x05other\x01s\0\x04\0\x06scheme\x03\
-\0\x0c\x01ks\x01k{\x01r\x02\x05rcode\x0e\x09info-code\x0f\x04\0\x11DNS-error-pay\
-load\x03\0\x10\x01k}\x01r\x02\x08alert-id\x12\x0dalert-message\x0e\x04\0\x1aTLS-\
-alert-received-payload\x03\0\x13\x01ky\x01r\x02\x0afield-name\x0e\x0afield-size\x15\
-\x04\0\x12field-size-payload\x03\0\x16\x01kw\x01k\x17\x01q'\x0bDNS-timeout\0\0\x09\
-DNS-error\x01\x11\0\x15destination-not-found\0\0\x17destination-unavailable\0\0\x19\
-destination-IP-prohibited\0\0\x19destination-IP-unroutable\0\0\x12connection-ref\
-used\0\0\x15connection-terminated\0\0\x12connection-timeout\0\0\x17connection-re\
-ad-timeout\0\0\x18connection-write-timeout\0\0\x18connection-limit-reached\0\0\x12\
-TLS-protocol-error\0\0\x15TLS-certificate-error\0\0\x12TLS-alert-received\x01\x14\
-\0\x13HTTP-request-denied\0\0\x1cHTTP-request-length-required\0\0\x16HTTP-reques\
-t-body-size\x01\x18\0\x1bHTTP-request-method-invalid\0\0\x18HTTP-request-URI-inv\
-alid\0\0\x19HTTP-request-URI-too-long\0\0\x20HTTP-request-header-section-size\x01\
-\x15\0\x18HTTP-request-header-size\x01\x19\0!HTTP-request-trailer-section-size\x01\
-\x15\0\x19HTTP-request-trailer-size\x01\x17\0\x18HTTP-response-incomplete\0\0!HT\
-TP-response-header-section-size\x01\x15\0\x19HTTP-response-header-size\x01\x17\0\
-\x17HTTP-response-body-size\x01\x18\0\"HTTP-response-trailer-section-size\x01\x15\
-\0\x1aHTTP-response-trailer-size\x01\x17\0\x1dHTTP-response-transfer-coding\x01\x0e\
-\0\x1cHTTP-response-content-coding\x01\x0e\0\x15HTTP-response-timeout\0\0\x13HTT\
-P-upgrade-failed\0\0\x13HTTP-protocol-error\0\0\x0dloop-detected\0\0\x13configur\
-ation-error\0\0\x0einternal-error\x01\x0e\0\x04\0\x0aerror-code\x03\0\x1a\x01q\x03\
-\x0einvalid-syntax\0\0\x09forbidden\0\0\x09immutable\0\0\x04\0\x0cheader-error\x03\
-\0\x1c\x01s\x04\0\x09field-key\x03\0\x1e\x04\0\x0afield-name\x03\0\x1f\x01p}\x04\
-\0\x0bfield-value\x03\0!\x04\0\x06fields\x03\x01\x04\0\x07headers\x03\0#\x04\0\x08\
+B\x09\x01ks\x01r\x03\x08src-paths\x04paths\x09mime-type\0\x04\0\x05asset\x03\0\x01\
+\x01@\0\0s\x04\0\x0aget-bundle\x01\x03\x01p\x02\x01k\x04\x01@\0\0\x05\x04\0\x0ag\
+et-assets\x01\x06\x03\0\x14kyushu:worker/bundle\x05\0\x01B\x0a\x04\0\x08pollable\
+\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\x02\
+\x01@\x01\x04self\x01\x01\0\x04\0\x16[method]pollable.block\x01\x03\x01p\x01\x01\
+py\x01@\x01\x02in\x04\0\x05\x04\0\x04poll\x01\x06\x03\0\x13wasi:io/poll@0.2.11\x05\
+\x01\x02\x03\0\x01\x08pollable\x01B\x0f\x02\x03\x02\x01\x02\x04\0\x08pollable\x03\
+\0\0\x01w\x04\0\x07instant\x03\0\x02\x01w\x04\0\x08duration\x03\0\x04\x01@\0\0\x03\
+\x04\0\x03now\x01\x06\x01@\0\0\x05\x04\0\x0aresolution\x01\x07\x01i\x01\x01@\x01\
+\x04when\x03\0\x08\x04\0\x11subscribe-instant\x01\x09\x01@\x01\x04when\x05\0\x08\
+\x04\0\x12subscribe-duration\x01\x0a\x03\0\"wasi:clocks/monotonic-clock@0.2.11\x05\
+\x03\x01B\x05\x01r\x02\x07secondsw\x0bnanosecondsy\x04\0\x08datetime\x03\0\0\x01\
+@\0\0\x01\x04\0\x03now\x01\x02\x04\0\x0aresolution\x01\x02\x03\0\x1dwasi:clocks/\
+wall-clock@0.2.11\x05\x04\x01B\x05\x01p}\x01@\x01\x03lenw\0\0\x04\0\x10get-rando\
+m-bytes\x01\x01\x01@\0\0w\x04\0\x0eget-random-u64\x01\x02\x03\0\x19wasi:random/r\
+andom@0.2.11\x05\x05\x01B\x04\x04\0\x05error\x03\x01\x01h\0\x01@\x01\x04self\x01\
+\0s\x04\0\x1d[method]error.to-debug-string\x01\x02\x03\0\x14wasi:io/error@0.2.11\
+\x05\x06\x02\x03\0\x05\x05error\x01B(\x02\x03\x02\x01\x07\x04\0\x05error\x03\0\0\
+\x02\x03\x02\x01\x02\x04\0\x08pollable\x03\0\x02\x01i\x01\x01q\x02\x15last-opera\
+tion-failed\x01\x04\0\x06closed\0\0\x04\0\x0cstream-error\x03\0\x05\x04\0\x0cinp\
+ut-stream\x03\x01\x04\0\x0doutput-stream\x03\x01\x01h\x07\x01p}\x01j\x01\x0a\x01\
+\x06\x01@\x02\x04self\x09\x03lenw\0\x0b\x04\0\x19[method]input-stream.read\x01\x0c\
+\x04\0\"[method]input-stream.blocking-read\x01\x0c\x01j\x01w\x01\x06\x01@\x02\x04\
+self\x09\x03lenw\0\x0d\x04\0\x19[method]input-stream.skip\x01\x0e\x04\0\"[method\
+]input-stream.blocking-skip\x01\x0e\x01i\x03\x01@\x01\x04self\x09\0\x0f\x04\0\x1e\
+[method]input-stream.subscribe\x01\x10\x01h\x08\x01@\x01\x04self\x11\0\x0d\x04\0\
+![method]output-stream.check-write\x01\x12\x01j\0\x01\x06\x01@\x02\x04self\x11\x08\
+contents\x0a\0\x13\x04\0\x1b[method]output-stream.write\x01\x14\x04\0.[method]ou\
+tput-stream.blocking-write-and-flush\x01\x14\x01@\x01\x04self\x11\0\x13\x04\0\x1b\
+[method]output-stream.flush\x01\x15\x04\0$[method]output-stream.blocking-flush\x01\
+\x15\x01@\x01\x04self\x11\0\x0f\x04\0\x1f[method]output-stream.subscribe\x01\x16\
+\x01@\x02\x04self\x11\x03lenw\0\x13\x04\0\"[method]output-stream.write-zeroes\x01\
+\x17\x04\05[method]output-stream.blocking-write-zeroes-and-flush\x01\x17\x01@\x03\
+\x04self\x11\x03src\x09\x03lenw\0\x0d\x04\0\x1c[method]output-stream.splice\x01\x18\
+\x04\0%[method]output-stream.blocking-splice\x01\x18\x03\0\x16wasi:io/streams@0.\
+2.11\x05\x08\x02\x03\0\x06\x0doutput-stream\x01B\x05\x02\x03\x02\x01\x09\x04\0\x0d\
+output-stream\x03\0\0\x01i\x01\x01@\0\0\x02\x04\0\x0aget-stdout\x01\x03\x03\0\x16\
+wasi:cli/stdout@0.2.11\x05\x0a\x01B\x05\x02\x03\x02\x01\x09\x04\0\x0doutput-stre\
+am\x03\0\0\x01i\x01\x01@\0\0\x02\x04\0\x0aget-stderr\x01\x03\x03\0\x16wasi:cli/s\
+tderr@0.2.11\x05\x0b\x02\x03\0\x06\x0cinput-stream\x01B\x05\x02\x03\x02\x01\x0c\x04\
+\0\x0cinput-stream\x03\0\0\x01i\x01\x01@\0\0\x02\x04\0\x09get-stdin\x01\x03\x03\0\
+\x15wasi:cli/stdin@0.2.11\x05\x0d\x02\x03\0\x02\x08duration\x01B\xc1\x01\x02\x03\
+\x02\x01\x0e\x04\0\x08duration\x03\0\0\x02\x03\x02\x01\x0c\x04\0\x0cinput-stream\
+\x03\0\x02\x02\x03\x02\x01\x09\x04\0\x0doutput-stream\x03\0\x04\x02\x03\x02\x01\x07\
+\x04\0\x08io-error\x03\0\x06\x02\x03\x02\x01\x02\x04\0\x08pollable\x03\0\x08\x01\
+q\x0a\x03get\0\0\x04head\0\0\x04post\0\0\x03put\0\0\x06delete\0\0\x07connect\0\0\
+\x07options\0\0\x05trace\0\0\x05patch\0\0\x05other\x01s\0\x04\0\x06method\x03\0\x0a\
+\x01q\x03\x04HTTP\0\0\x05HTTPS\0\0\x05other\x01s\0\x04\0\x06scheme\x03\0\x0c\x01\
+ks\x01k{\x01r\x02\x05rcode\x0e\x09info-code\x0f\x04\0\x11DNS-error-payload\x03\0\
+\x10\x01k}\x01r\x02\x08alert-id\x12\x0dalert-message\x0e\x04\0\x1aTLS-alert-rece\
+ived-payload\x03\0\x13\x01ky\x01r\x02\x0afield-name\x0e\x0afield-size\x15\x04\0\x12\
+field-size-payload\x03\0\x16\x01kw\x01k\x17\x01q'\x0bDNS-timeout\0\0\x09DNS-erro\
+r\x01\x11\0\x15destination-not-found\0\0\x17destination-unavailable\0\0\x19desti\
+nation-IP-prohibited\0\0\x19destination-IP-unroutable\0\0\x12connection-refused\0\
+\0\x15connection-terminated\0\0\x12connection-timeout\0\0\x17connection-read-tim\
+eout\0\0\x18connection-write-timeout\0\0\x18connection-limit-reached\0\0\x12TLS-\
+protocol-error\0\0\x15TLS-certificate-error\0\0\x12TLS-alert-received\x01\x14\0\x13\
+HTTP-request-denied\0\0\x1cHTTP-request-length-required\0\0\x16HTTP-request-body\
+-size\x01\x18\0\x1bHTTP-request-method-invalid\0\0\x18HTTP-request-URI-invalid\0\
+\0\x19HTTP-request-URI-too-long\0\0\x20HTTP-request-header-section-size\x01\x15\0\
+\x18HTTP-request-header-size\x01\x19\0!HTTP-request-trailer-section-size\x01\x15\
+\0\x19HTTP-request-trailer-size\x01\x17\0\x18HTTP-response-incomplete\0\0!HTTP-r\
+esponse-header-section-size\x01\x15\0\x19HTTP-response-header-size\x01\x17\0\x17\
+HTTP-response-body-size\x01\x18\0\"HTTP-response-trailer-section-size\x01\x15\0\x1a\
+HTTP-response-trailer-size\x01\x17\0\x1dHTTP-response-transfer-coding\x01\x0e\0\x1c\
+HTTP-response-content-coding\x01\x0e\0\x15HTTP-response-timeout\0\0\x13HTTP-upgr\
+ade-failed\0\0\x13HTTP-protocol-error\0\0\x0dloop-detected\0\0\x13configuration-\
+error\0\0\x0einternal-error\x01\x0e\0\x04\0\x0aerror-code\x03\0\x1a\x01q\x03\x0e\
+invalid-syntax\0\0\x09forbidden\0\0\x09immutable\0\0\x04\0\x0cheader-error\x03\0\
+\x1c\x01s\x04\0\x09field-key\x03\0\x1e\x04\0\x0afield-name\x03\0\x1f\x01p}\x04\0\
+\x0bfield-value\x03\0!\x04\0\x06fields\x03\x01\x04\0\x07headers\x03\0#\x04\0\x08\
 trailers\x03\0#\x04\0\x10incoming-request\x03\x01\x04\0\x10outgoing-request\x03\x01\
 \x04\0\x0frequest-options\x03\x01\x04\0\x11response-outparam\x03\x01\x01{\x04\0\x0b\
 status-code\x03\0*\x04\0\x11incoming-response\x03\x01\x04\0\x0dincoming-body\x03\

@@ -63,8 +63,14 @@ async fn bundle_js(
         .with_bundle(bundle_str, assets)?
         .build();
 
-    // Empty WASI context — no preopened dirs or env vars to snapshot.
-    let mut store = Store::new(&engine, WorkerContext::new().build());
+    // WASI context with preopened dirs in case there is assets to load.
+    // No other mounts or env vars.
+    let mounts = assets_config.map(|config| vec![config.to_mount()]);
+
+    let mut store = Store::new(
+        &engine,
+        WorkerContext::new().with_mounts(mounts.as_ref())?.build(),
+    );
 
     let initialized = Wizer::new()
         .keep_init_func(true)

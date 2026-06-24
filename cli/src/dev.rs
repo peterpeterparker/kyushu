@@ -1,5 +1,5 @@
 use crate::assets::load_assets;
-use crate::config::{AssetsConfig, DevConfig, InputConfig, WorkerConfig};
+use crate::config::{AssetsConfig, DevConfig, InputConfig, MountConfig, WorkerConfig};
 use crate::javascript::bundle;
 use crate::server;
 use crate::worker::{WORKER_TEMPLATE, WorkerAssets, WorkerContext, WorkerLinker, WorkerState};
@@ -36,15 +36,20 @@ pub async fn dev(
         println!("Live reload disabled.");
     }
 
-    let callback = |(instance_pre, config): (
-        Arc<RwLock<InstancePre<WorkerState>>>,
-        WorkerConfig,
-    ),
-                    req| async move {
-        handle_request(instance_pre, config, req).await
-    };
+    let callback =
+        |(instance_pre, config, assets_config): (
+            Arc<RwLock<InstancePre<WorkerState>>>,
+            WorkerConfig,
+            Option<AssetsConfig>,
+        ),
+         req| async move { handle_request(instance_pre, config, assets_config, req).await };
 
-    server::serve(port, (instance_pre, worker_config.clone()), callback).await?;
+    server::serve(
+        port,
+        (instance_pre, worker_config.clone(), assets_config.cloned()),
+        callback,
+    )
+    .await?;
 
     Ok(())
 }
@@ -138,15 +143,24 @@ async fn watch(
 async fn handle_request(
     instance_pre: Arc<RwLock<InstancePre<WorkerState>>>,
     config: WorkerConfig,
+    assets_config: Option<AssetsConfig>,
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<HyperOutgoingBody>> {
     let instance_pre = instance_pre.read().await.clone();
+
+    let all_mounts: Vec<MountConfig> = config
+        .mounts
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .chain(assets_config.map(|c| c.to_mount()))
+        .collect();
 
     let mut store = Store::new(
         instance_pre.engine(),
         WorkerContext::new()
             .inherit_stdio()
-            .with_mounts(config.mounts.as_ref())?
+            .with_mounts((!all_mounts.is_empty()).then_some(&all_mounts))?
             .with_envs(config.env.as_ref())
             .build(),
     );
