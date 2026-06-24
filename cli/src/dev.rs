@@ -1,7 +1,8 @@
-use crate::config::{DevConfig, InputConfig, WorkerConfig};
+use crate::assets::load_assets;
+use crate::config::{AssetsConfig, DevConfig, InputConfig, WorkerConfig};
 use crate::javascript::bundle;
 use crate::server;
-use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerState};
+use crate::worker::{WORKER_TEMPLATE, WorkerAssets, WorkerContext, WorkerLinker, WorkerState};
 use anyhow::Result;
 use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
@@ -16,6 +17,7 @@ use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 pub async fn dev(
     dev_config: &DevConfig,
     input_config: &InputConfig,
+    assets_config: Option<&AssetsConfig>,
     worker_config: &WorkerConfig,
 ) -> Result<()> {
     let port = dev_config.port();
@@ -23,11 +25,13 @@ pub async fn dev(
     // Unlike the runner which loads a pre-built Wizer snapshot via ProxyPre,
     // dev mode skips Wizer entirely and holds a raw InstancePre. kyu-initialize
     // is called fresh on each request to initialize the JS runtime with the current bundle.
-    let instance_pre = Arc::new(RwLock::new(build_instance_pre(input_config).await?));
+    let instance_pre = Arc::new(RwLock::new(
+        build_instance_pre(input_config, assets_config).await?,
+    ));
 
     // Live reload watcher
     if dev_config.watch() {
-        init_watch(input_config, &instance_pre);
+        init_watch(input_config, assets_config, &instance_pre);
     } else {
         println!("Live reload disabled.");
     }
@@ -45,16 +49,28 @@ pub async fn dev(
     Ok(())
 }
 
-async fn build_instance_pre(input_config: &InputConfig) -> Result<InstancePre<WorkerState>> {
+async fn build_instance_pre(
+    input_config: &InputConfig,
+    assets_config: Option<&AssetsConfig>,
+) -> Result<InstancePre<WorkerState>> {
     let src = input_config.src();
 
+    // TODO: refactor bundle and load_assets duplicated in dev and build
     println!("Bundling {}...", src);
     let bundle_str = bundle(src).await?;
+
+    let assets = assets_config
+        .map(|config| {
+            println!("Loading assets from {}...", config.dir());
+            load_assets(config.dir()).map(WorkerAssets::from)
+        })
+        .transpose()?;
 
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
         .with_http()?
         .with_bundle(bundle_str)?
+        .with_assets(assets)?
         .build();
 
     let component = Component::new(&engine, WORKER_TEMPLATE)
@@ -65,11 +81,17 @@ async fn build_instance_pre(input_config: &InputConfig) -> Result<InstancePre<Wo
         .map_err(|e| anyhow::anyhow!("failed to create InstancePre: {e:?}"))
 }
 
-fn init_watch(input_config: &InputConfig, instance_pre: &Arc<RwLock<InstancePre<WorkerState>>>) {
+fn init_watch(
+    input_config: &InputConfig,
+    assets_config: Option<&AssetsConfig>,
+    instance_pre: &Arc<RwLock<InstancePre<WorkerState>>>,
+) {
     let instance_pre_watcher = instance_pre.clone();
-    let config = input_config.clone();
+    let input_config = input_config.clone();
+    let assets_config = assets_config.cloned();
+
     tokio::spawn(async move {
-        if let Err(e) = watch(config, instance_pre_watcher).await {
+        if let Err(e) = watch(input_config, assets_config, instance_pre_watcher).await {
             eprintln!("Watcher error: {e:?}");
         }
     });
@@ -77,6 +99,7 @@ fn init_watch(input_config: &InputConfig, instance_pre: &Arc<RwLock<InstancePre<
 
 async fn watch(
     input_config: InputConfig,
+    assets_config: Option<AssetsConfig>,
     instance_pre: Arc<RwLock<InstancePre<WorkerState>>>,
 ) -> Result<()> {
     let src_dir = Path::new(input_config.src())
@@ -101,7 +124,7 @@ async fn watch(
 
     while let Some(()) = rx.recv().await {
         println!("Change detected, reloading...");
-        match build_instance_pre(&input_config).await {
+        match build_instance_pre(&input_config, assets_config.as_ref()).await {
             Ok(new_pre) => {
                 *instance_pre.write().await = new_pre;
                 println!("Worker reloaded.");

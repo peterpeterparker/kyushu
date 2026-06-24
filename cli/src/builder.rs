@@ -1,23 +1,31 @@
+use crate::assets::load_assets;
+use crate::config::{AssetsConfig, InputConfig, OutputConfig};
+use crate::javascript::bundle;
+use crate::worker::{WORKER_TEMPLATE, WorkerAssets, WorkerContext, WorkerLinker, WorkerVersion};
 use anyhow::Result;
 use wasmtime::Store;
 use wasmtime_wizer::Wizer;
 
-use crate::config::{InputConfig, OutputConfig};
-use crate::javascript::bundle;
-use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerVersion};
-
-pub async fn build(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
+pub async fn build(
+    input_config: &InputConfig,
+    output_config: &OutputConfig,
+    assets_config: Option<&AssetsConfig>,
+) -> Result<()> {
     WorkerVersion::new()
         .with_bytes(WORKER_TEMPLATE)
         .print()
         .await?;
 
-    bundle_js(input_config, output_config).await?;
+    bundle_js(input_config, output_config, assets_config).await?;
 
     Ok(())
 }
 
-async fn bundle_js(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
+async fn bundle_js(
+    input_config: &InputConfig,
+    output_config: &OutputConfig,
+    assets_config: Option<&AssetsConfig>,
+) -> Result<()> {
     let src = input_config.src();
     let outdir = output_config.dir();
     let worker_wasm = output_config.worker_wasm();
@@ -29,6 +37,14 @@ async fn bundle_js(input_config: &InputConfig, output_config: &OutputConfig) -> 
     println!("Bundling {}...", src);
 
     let bundle_str = bundle(src).await?;
+
+    // Load the static assets if a related source directory is provided.
+    let assets = assets_config
+        .map(|config| {
+            println!("Loading assets from {}...", config.dir());
+            load_assets(config.dir()).map(WorkerAssets::from)
+        })
+        .transpose()?;
 
     // Step 2: pre-initialize the worker Wasm template with the JS bundle using Wizer.
     //
@@ -45,6 +61,7 @@ async fn bundle_js(input_config: &InputConfig, output_config: &OutputConfig) -> 
         .with_logging()?
         .with_http()?
         .with_bundle(bundle_str)?
+        .with_assets(assets)?
         .build();
 
     // Empty WASI context — no preopened dirs or env vars to snapshot.

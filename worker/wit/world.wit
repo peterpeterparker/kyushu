@@ -1,16 +1,23 @@
 package kyushu:worker;
 
-/// Custom interface used during `kyu build` to inject the JS bundle into the
+/// Custom interface used during `kyu build` to inject resources into the
 /// worker's Wasm memory via Wizer pre-initialization.
-///
-/// Why: WASI state (env vars, preopened dirs) is snapshotted by Wizer and would
-/// override runtime state provided by the runner. By using a custom host import
-/// instead of WASI filesystem or env vars, we avoid polluting the snapshot with
-/// build-time state, leaving the runtime free to provide its own env and mounts.
-///
-/// At runtime this import is stubbed out — the bundle is already frozen in memory.
 interface bundle {
+  /// The JS bundle executed at runtime (the `fetch` handler)
   get-bundle: func() -> string;
+
+  /// An optional list of static assets (HTML, CSS, images and other files)
+  /// to upload as part of the Worker. Useful for implementating a static file
+  /// server without IO interactions.
+  record asset {
+    /// The asset's URL path normalized with `/`-prefix
+    /// e.g. `/index.html` or `/images/hello.png`
+    path: string,
+    bytes: list<u8>,
+    mime-type: option<string>,
+  }
+
+  get-assets: func() -> option<list<asset>>;
 }
 
 world worker {

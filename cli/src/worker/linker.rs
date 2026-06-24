@@ -1,3 +1,4 @@
+use crate::worker::WorkerAssets;
 use crate::worker::state::WorkerState;
 use anyhow::Result;
 use wasmtime::Engine;
@@ -75,6 +76,34 @@ impl WorkerLinker {
         self.linker
             .instance("kyushu:worker/bundle")?
             .func_new_async("get-bundle", |_store, _types, _params, _results| {
+                Box::new(async move { Ok(()) })
+            })?;
+        Ok(self)
+    }
+
+    /// Provide static assets via `kyushu:worker/bundle#get-assets`.
+    /// Used during `kyu build`. Wizer calls this to freeze assets into Wasm memory during pre-initialization.
+    pub fn with_assets(mut self, assets: Option<WorkerAssets>) -> Result<Self> {
+        self.linker
+            .instance("kyushu:worker/bundle")?
+            .func_new_async("get-assets", move |_store, _types, _params, results| {
+                let val = assets
+                    .as_ref()
+                    .map_or(Val::Option(None), |asset| asset.to_val());
+                Box::new(async move {
+                    results[0] = val;
+                    Ok(())
+                })
+            })?;
+        Ok(self)
+    }
+
+    /// Stub out `kyushu:worker/bundle#get-assets`.
+    /// Used at runtime as assets are already frozen in Wasm memory by Wizer.
+    pub fn with_assets_stub(mut self) -> Result<Self> {
+        self.linker
+            .instance("kyushu:worker/bundle")?
+            .func_new_async("get-assets", |_store, _types, _params, _results| {
                 Box::new(async move { Ok(()) })
             })?;
         Ok(self)

@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use config::KyuConfig;
 
+mod assets;
 mod builder;
 mod config;
 mod dev;
@@ -71,6 +72,7 @@ async fn main() -> Result<()> {
             builder::build(
                 &config.input.unwrap_or_default(),
                 &config.output.unwrap_or_default(),
+                config.assets.as_ref(),
             )
             .await?;
         }
@@ -78,6 +80,7 @@ async fn main() -> Result<()> {
             dev::dev(
                 &config.dev.unwrap_or_default(),
                 &config.input.unwrap_or_default(),
+                config.assets.as_ref(),
                 &config.worker.unwrap_or_default(),
             )
             .await?;
