@@ -128,6 +128,15 @@ impl WorkerLinker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::Asset;
+
+    fn make_worker_assets() -> WorkerAssets {
+        WorkerAssets::from(vec![Asset {
+            path: "/index.html".to_string(),
+            bytes: b"<html>".to_vec(),
+            mime_type: Some("text/html".to_string()),
+        }])
+    }
 
     #[test]
     fn test_new() {
@@ -155,6 +164,26 @@ mod tests {
     }
 
     #[test]
+    fn test_with_assets() {
+        assert!(
+            WorkerLinker::new()
+                .unwrap()
+                .with_assets(Some(make_worker_assets()))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_with_assets_none() {
+        assert!(WorkerLinker::new().unwrap().with_assets(None).is_ok());
+    }
+
+    #[test]
+    fn test_with_assets_stub() {
+        assert!(WorkerLinker::new().unwrap().with_assets_stub().is_ok());
+    }
+
+    #[test]
     fn test_with_http() {
         assert!(WorkerLinker::new().unwrap().with_http().is_ok());
     }
@@ -166,6 +195,8 @@ mod tests {
             .with_logging()
             .unwrap()
             .with_bundle_stub()
+            .unwrap()
+            .with_assets_stub()
             .unwrap()
             .with_http()
             .unwrap()
@@ -179,6 +210,16 @@ mod tests {
             .with_bundle("console.log('hello')".to_string())
             .unwrap()
             .with_bundle_stub();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_assets_and_stub_are_mutually_exclusive() {
+        let result = WorkerLinker::new()
+            .unwrap()
+            .with_assets(Some(make_worker_assets()))
+            .unwrap()
+            .with_assets_stub();
         assert!(result.is_err());
     }
 }
