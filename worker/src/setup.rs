@@ -1,4 +1,5 @@
 use crate::bindings;
+use crate::bindings::kyushu::worker::bundle::{Asset, get_assets};
 
 const TYPES_BUNDLE: &str = include_str!("../../packages/types/dist/index.mjs");
 
@@ -10,6 +11,10 @@ pub fn initialize() {
 
     let bundle = bindings::kyushu::worker::bundle::get_bundle();
     kyushu_runtime::add_additional_module("@kyushu/app", Box::new(move || bundle.clone()));
+
+    // Register @kyushu/assets as a builtin module containing the static assets frozen at build time.
+    // Always registered the exports `__kyushu_assets__` set to null if no assets are configured.
+    add_assets_module();
 
     // Must be called after registering modules and before the first request is served.
     //
@@ -26,4 +31,42 @@ pub fn initialize() {
     // By initializing here, INIT_PHASE is snapshotted as WizerPreInitialized and
     // async_exported_function() becomes the single block_on entry point per request.
     kyushu_runtime::internal::wizer_initialize();
+}
+
+fn add_assets_module() {
+    let assets_module = get_assets()
+        .map(|assets| generate_assets_module(&assets))
+        .unwrap_or_else(|| "export const __kyushu_assets__ = null;".to_string());
+
+    kyushu_runtime::add_additional_module(
+        "@kyushu/assets",
+        Box::new(move || assets_module.clone()),
+    );
+}
+
+fn generate_assets_module(assets: &[Asset]) -> String {
+    let entries: String = assets
+        .iter()
+        .map(|asset| {
+            let bytes: String = asset
+                .bytes
+                .iter()
+                .map(|b| b.to_string())
+                .collect::<Vec<String>>()
+                .join(",");
+
+            let mime = match &asset.mime_type {
+                Some(m) => format!("\"{}\"", m),
+                None => "undefined".to_string(),
+            };
+
+            format!(
+                "\"{}\": {{ bytes: new Uint8Array([{}]), mimeType: {} }}",
+                asset.path, bytes, mime
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",\n");
+
+    format!("export const __kyushu_assets__ = {{ {} }};", entries)
 }
