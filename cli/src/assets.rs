@@ -29,12 +29,28 @@ impl Asset {
 pub fn load_assets(dir: &str) -> Result<Vec<Asset>> {
     let base = Path::new(dir);
 
-    WalkDir::new(base)
+    if !base.exists() {
+        return Err(anyhow::anyhow!(
+            "Assets directory '{}' does not exist.",
+            dir
+        ));
+    }
+
+    let assets = WalkDir::new(base)
         .into_iter()
         .filter_map(|entry| entry.ok())
         .filter(|entry| entry.file_type().is_file())
         .map(|file| Asset::from_path(base, file.path()))
-        .collect()
+        .collect::<Result<Vec<Asset>>>()?;
+
+    if assets.is_empty() {
+        eprintln!(
+            "Warning: assets directory '{}' is empty, is that expected?",
+            dir
+        );
+    }
+
+    Ok(assets)
 }
 
 #[cfg(test)]
@@ -116,5 +132,19 @@ mod tests {
             paths,
             vec!["/assets/app.js", "/assets/logo.png", "/index.html"]
         );
+    }
+
+    #[test]
+    fn test_load_assets_directory_not_found() {
+        let result = load_assets("/nonexistent/path");
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_load_assets_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let assets = load_assets(dir.path().to_str().unwrap()).unwrap();
+        assert!(assets.is_empty());
     }
 }

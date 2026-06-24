@@ -36,11 +36,28 @@ export const WorkerResponseSchema = z.strictObject({
 });
 
 /**
+ * @see EnvAssets
+ */
+export const EnvAssetsSchema = z.strictObject({
+  fetch: z.function({
+    input: z.tuple([WorkerRequestSchema]),
+    output: z.promise(WorkerResponseSchema),
+  }),
+});
+
+/**
+ * @see Env
+ */
+export const EnvSchema = z.strictObject({
+  ASSETS: z.optional(EnvAssetsSchema),
+});
+
+/**
  * @see ExportedHandler
  */
 export const ExportedHandlerSchema = z.strictObject({
   fetch: z.function({
-    input: z.tuple([WorkerRequestSchema]),
+    input: z.tuple([WorkerRequestSchema, EnvSchema]),
     output: z.promise(WorkerResponseSchema),
   }),
 });
@@ -77,6 +94,21 @@ export interface WorkerResponse {
 }
 
 /**
+ * Fetch and serve static assets.
+ */
+export interface EnvAssets {
+  fetch(request: WorkerRequest): Promise<WorkerResponse>;
+}
+
+/**
+ * The environment object passed to the worker's fetch handler.
+ */
+export interface Env {
+  /** Static assets are available when `[assets]` is configured in `kyu.json` and loaded at build time. */
+  ASSETS?: EnvAssets;
+}
+
+/**
  * The default export shape expected by Kyushu workers.
  *
  * @example
@@ -84,14 +116,14 @@ export interface WorkerResponse {
  * import type { ExportedHandler } from "kyushu-types";
  *
  * export default {
- *   fetch(request) {
+ *   fetch(request, env) {
  *     return { status: 200, body: "Hello, world!" };
  *   },
  * } satisfies ExportedHandler;
  * ```
  */
 export interface ExportedHandler {
-  fetch(request: WorkerRequest): Promise<WorkerResponse>;
+  fetch(request: WorkerRequest, env: Env): Promise<WorkerResponse>;
 }
 
 export default ExportedHandler;
