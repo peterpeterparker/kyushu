@@ -22,7 +22,7 @@ impl WorkerAssets {
                         Val::List(asset.bytes.iter().map(|bytes| Val::U8(*bytes)).collect()),
                     ),
                     (
-                        "mime_type".to_string(),
+                        "mime-type".to_string(),
                         Val::Option(
                             asset
                                 .mime_type
