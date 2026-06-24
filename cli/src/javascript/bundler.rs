@@ -69,7 +69,7 @@ mod tests {
         assert!(result.is_ok());
 
         let code = result.unwrap();
-        let expected_code = "var e={async fetch(e){return{status:200,body:`hello world`,headers:{\"content-type\":`text/plain`}}}};export{e as default};";
+        let expected_code = "Object.defineProperty(import.meta,\"url\",{value:`file:///virtual/kyushu-pseudo-module.js`});var e={async fetch(e){return{status:200,body:`hello world`,headers:{\"content-type\":`text/plain`}}}};export{e as default};";
         assert_eq!(code.trim(), expected_code);
     }
 
