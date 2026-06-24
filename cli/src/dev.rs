@@ -69,8 +69,7 @@ async fn build_instance_pre(
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
         .with_http()?
-        .with_bundle(bundle_str)?
-        .with_assets(assets)?
+        .with_bundle(bundle_str, assets)?
         .build();
 
     let component = Component::new(&engine, WORKER_TEMPLATE)

@@ -60,8 +60,7 @@ async fn bundle_js(
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
         .with_http()?
-        .with_bundle(bundle_str)?
-        .with_assets(assets)?
+        .with_bundle(bundle_str, assets)?
         .build();
 
     // Empty WASI context — no preopened dirs or env vars to snapshot.

@@ -20,7 +20,6 @@ pub async fn run(run_config: &RunConfig, worker_config: &WorkerConfig) -> Result
         .with_logging()?
         .with_http()?
         .with_bundle_stub()?
-        .with_assets_stub()?
         .build();
 
     let component = Component::from_file(&engine, wasm_path)?;

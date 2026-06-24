@@ -27,7 +27,6 @@ impl WorkerVersion {
             .with_logging()?
             .with_http()?
             .with_bundle_stub()?
-            .with_assets_stub()?
             .build();
 
         let component = wasmtime::component::Component::new(&engine, &self.wasm)?;
