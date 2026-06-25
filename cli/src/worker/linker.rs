@@ -84,10 +84,7 @@ impl WorkerLinker {
         instance.func_new_async("get-assets", move |mut store, _types, _params, results| {
             let assets = assets.clone();
             Box::new(async move {
-                let assets = match Arc::try_unwrap(assets) {
-                    Ok(a) => a,
-                    Err(arc) => (*arc).clone(),
-                };
+                let assets = Arc::try_unwrap(assets).unwrap_or_else(|arc| (*arc).clone());
 
                 let Some(assets) = assets else {
                     results[0] = Val::Option(None);
@@ -109,59 +106,20 @@ impl WorkerLinker {
             })
         })?;
 
-        instance.func_new_async(
-            "[method]asset.path",
-            move |mut store, _types, params, results| {
-                Box::new(async move {
-                    if let Some(Val::Resource(r)) = params.get(0) {
-                        let resource = Resource::<Asset>::try_from_resource_any(*r, &mut store)?;
+        asset_method!(instance, "[method]asset.path", |asset, results| {
+            results[0] = Val::String(asset.path().into());
+        });
 
-                        let asset = store.data().table.get(&resource)?;
-                        results[0] = Val::String(asset.path().clone().into());
-                    }
-                    Ok(())
-                })
-            },
-        )?;
+        asset_method!(instance, "[method]asset.mime-type", |asset, results| {
+            results[0] = Val::Option(asset.mime_type().map(|m| Box::new(Val::String(m.into()))));
+        });
 
-        instance.func_new_async(
-            "[method]asset.mime-type",
-            move |mut store, _types, params, results| {
-                Box::new(async move {
-                    if let Some(Val::Resource(r)) = params.get(0) {
-                        let resource = Resource::<Asset>::try_from_resource_any(*r, &mut store)?;
-
-                        let asset = store.data().table.get(&resource)?;
-                        results[0] = Val::Option(
-                            asset
-                                .mime_type()
-                                .as_ref()
-                                .map(|m| Box::new(Val::String(m.clone().into()))),
-                        );
-                    }
-                    Ok(())
-                })
-            },
-        )?;
-
-        instance.func_new_async(
-            "[method]asset.bytes",
-            move |mut store, _types, params, results| {
-                Box::new(async move {
-                    if let Some(Val::Resource(r)) = params.get(0) {
-                        let resource = Resource::<Asset>::try_from_resource_any(*r, &mut store)?;
-
-                        let asset = store.data().table.get(&resource)?;
-                        let bytes = asset
-                            .bytes()
-                            .map_err(|e| wasmtime::Error::msg(e.to_string()))?;
-
-                        results[0] = Val::List(bytes.iter().map(|b| Val::U8(*b)).collect());
-                    }
-                    Ok(())
-                })
-            },
-        )?;
+        asset_method!(instance, "[method]asset.bytes", |asset, results| {
+            let bytes = asset
+                .bytes()
+                .map_err(|e| wasmtime::Error::msg(e.to_string()))?;
+            results[0] = Val::List(bytes.iter().map(|b| Val::U8(*b)).collect());
+        });
 
         Ok(self)
     }
