@@ -1,7 +1,0 @@
-[assets]
-dir = "../../packages/docs/dist"
-
-[[worker.mounts]]
-host = "."
-guest = "/"
-writable = true

@@ -121,6 +121,7 @@ async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
             import app from "@kyushu/app";
             import { ExportedHandlerSchema, WorkerRequestSchema, WorkerResponseSchema } from "@kyushu/types";
 
+            // TODO: to be properly implemented
             const env = {
                 ASSETS: {
                     fetch: async (request) => {
