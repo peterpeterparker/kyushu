@@ -1,6 +1,7 @@
 #[allow(warnings)]
 mod bindings;
 mod handler;
+mod runtime;
 mod setup;
 mod types;
 

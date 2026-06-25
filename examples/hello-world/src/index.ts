@@ -1,11 +1,9 @@
 import type { ExportedHandler } from "kyushu-types";
 
 export default {
-  async fetch() {
-    return {
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ hello: "world" }),
-    };
+  async fetch(request, env) {
+    console.log(request, env);
+
+    return await env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler;

@@ -120,13 +120,12 @@ async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
         let promise = Module::evaluate(ctx.clone(), "@kyushu/handler", r#"
             import app from "@kyushu/app";
             import { ExportedHandlerSchema, WorkerRequestSchema, WorkerResponseSchema } from "@kyushu/types";
-            import { __kyushu_assets__ } from "@kyushu/assets";
 
             const env = {
-                ASSETS: __kyushu_assets__ ? {
+                ASSETS: {
                     fetch: async (request) => {
                         const url = new URL(request.url);
-                        const asset = __kyushu_assets__[url.pathname];
+                        const asset = globalThis.__kyushu_get_asset__(url.pathname);
 
                         if (!asset) {
                             return { status: 404, body: "Not Found" };
@@ -138,7 +137,7 @@ async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
                             headers: { "content-type": asset.mimeType ?? "application/octet-stream" }
                         };
                     }
-                } : undefined
+                }
             };
 
             const handler = ExportedHandlerSchema.parse(app);

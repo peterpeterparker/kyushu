@@ -1845,6 +1845,10 @@ impl JsState {
                  .catch(&ctx)
                  .unwrap_or_else(|e| panic!("Failed to finish importing user module {name}:\n{}", format_caught_error(e)));
             }
+
+            for f in crate::JS_ADDITIONAL_FUNCTIONS.iter() {
+                f(&ctx).expect("Failed to run init function");
+            }
         })
             .await;
         drain_and_idle(self).await;
