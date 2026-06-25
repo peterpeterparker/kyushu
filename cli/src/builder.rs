@@ -39,7 +39,7 @@ async fn bundle_js(
     let bundle_str = bundle(src).await?;
 
     // Load the static assets if a related source directory is provided.
-    let _assets = assets_config
+    let assets = assets_config
         .map(|config| {
             println!("Loading assets from {}...", config.dir());
             load_assets(config.dir())
@@ -52,7 +52,7 @@ async fn bundle_js(
     // via a custom host import (`kyushu:worker/bundle#get-bundle`), stores it in a
     // static OnceLock, then snapshots the Wasm memory state.
     //
-    // We use a custom host import instead of WASI filesystem or env vars to avoid
+    // ‼️ We **must** use a custom host import instead of WASI filesystem or env vars to avoid
     // polluting the Wizer snapshot with build-time WASI state (preopened dirs, env vars)
     // which would override the runtime state provided by `kyu run`.
     println!("Pre-initializing worker Wasm...");
@@ -60,7 +60,7 @@ async fn bundle_js(
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
         .with_http()?
-        .with_bundle(bundle_str)?
+        .with_bundle(bundle_str, assets)?
         .build();
 
     // Empty WASI context — no preopened dirs or env vars to snapshot.
