@@ -52,7 +52,7 @@ async fn bundle_js(
     // via a custom host import (`kyushu:worker/bundle#get-bundle`), stores it in a
     // static OnceLock, then snapshots the Wasm memory state.
     //
-    // ⚠️ We use a custom host import instead of WASI filesystem or env vars to avoid
+    // ‼️ We **must** use a custom host import instead of WASI filesystem or env vars to avoid
     // polluting the Wizer snapshot with build-time WASI state (preopened dirs, env vars)
     // which would override the runtime state provided by `kyu run`.
     println!("Pre-initializing worker Wasm...");
