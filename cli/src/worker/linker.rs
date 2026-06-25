@@ -1,4 +1,4 @@
-use crate::worker::WorkerAssets;
+use crate::assets::Asset;
 use crate::worker::state::WorkerState;
 use anyhow::Result;
 use std::sync::Arc;
@@ -10,12 +10,6 @@ use wasmtime_wasi_http::p2::add_only_http_to_linker_async;
 pub struct WorkerLinker {
     engine: Engine,
     linker: Linker<WorkerState>,
-}
-
-struct HostAsset {
-    pub path: String,
-    pub src_path: String,
-    pub mime_type: Option<String>,
 }
 
 impl WorkerLinker {
@@ -64,7 +58,7 @@ impl WorkerLinker {
 
     /// Provide the JS bundle and assets via `kyushu:worker/bundle`.
     /// Used during `kyu build`. Wizer calls this to get the JS bundle during pre-initialization.
-    pub fn with_bundle(mut self, bundle: String, assets: Option<WorkerAssets>) -> Result<Self> {
+    pub fn with_bundle(mut self, bundle: String, assets: Option<Vec<Asset>>) -> Result<Self> {
         let mut instance = self.linker.instance("kyushu:worker/bundle")?;
 
         instance.func_new_async("get-bundle", move |_store, _types, _params, results| {
@@ -77,39 +71,40 @@ impl WorkerLinker {
 
         let assets = Arc::new(assets);
 
-        let resource_ty = ResourceType::host::<HostAsset>();
+        let resource_ty = ResourceType::host::<Asset>();
 
         instance.resource("asset", resource_ty, |mut store, rep| {
             store
                 .data_mut()
                 .table
-                .delete(Resource::<HostAsset>::new_own(rep))?;
+                .delete(Resource::<Asset>::new_own(rep))?;
             Ok(())
         })?;
 
         instance.func_new_async("get-assets", move |mut store, _types, _params, results| {
             let assets = assets.clone();
             Box::new(async move {
-                match assets.as_ref() {
-                    None => results[0] = Val::Option(None),
-                    Some(worker_assets) => {
-                        let handles = worker_assets
-                            .0
-                            .iter()
-                            .map(|asset| {
-                                let resource = store.data_mut().table.push(HostAsset {
-                                    path: asset.path.clone(),
-                                    src_path: asset.src_path.clone(),
-                                    mime_type: asset.mime_type.clone(),
-                                })?;
-                                let resource_any = resource.try_into_resource_any(&mut store)?;
-                                Ok(Val::Resource(resource_any))
-                            })
-                            .collect::<anyhow::Result<Vec<Val>>>()
-                            .map_err(|e| wasmtime::Error::msg(e.to_string()))?;
-                        results[0] = Val::Option(Some(Box::new(Val::List(handles))));
-                    }
-                }
+                let assets = match Arc::try_unwrap(assets) {
+                    Ok(a) => a,
+                    Err(arc) => (*arc).clone(),
+                };
+
+                let Some(assets) = assets else {
+                    results[0] = Val::Option(None);
+                    return Ok(());
+                };
+
+                let handles = assets
+                    .iter()
+                    .map(|asset| {
+                        let resource = store.data_mut().table.push(asset.clone())?;
+                        let resource_any = resource.try_into_resource_any(&mut store)?;
+                        Ok(Val::Resource(resource_any))
+                    })
+                    .collect::<anyhow::Result<Vec<Val>>>()
+                    .map_err(|e| wasmtime::Error::msg(e.to_string()))?;
+
+                results[0] = Val::Option(Some(Box::new(Val::List(handles))));
                 Ok(())
             })
         })?;
@@ -119,10 +114,10 @@ impl WorkerLinker {
             move |mut store, _types, params, results| {
                 Box::new(async move {
                     if let Some(Val::Resource(r)) = params.get(0) {
-                        let resource =
-                            Resource::<HostAsset>::try_from_resource_any(*r, &mut store)?;
+                        let resource = Resource::<Asset>::try_from_resource_any(*r, &mut store)?;
+
                         let asset = store.data().table.get(&resource)?;
-                        results[0] = Val::String(asset.path.clone().into());
+                        results[0] = Val::String(asset.path().clone().into());
                     }
                     Ok(())
                 })
@@ -134,12 +129,12 @@ impl WorkerLinker {
             move |mut store, _types, params, results| {
                 Box::new(async move {
                     if let Some(Val::Resource(r)) = params.get(0) {
-                        let resource =
-                            Resource::<HostAsset>::try_from_resource_any(*r, &mut store)?;
+                        let resource = Resource::<Asset>::try_from_resource_any(*r, &mut store)?;
+
                         let asset = store.data().table.get(&resource)?;
                         results[0] = Val::Option(
                             asset
-                                .mime_type
+                                .mime_type()
                                 .as_ref()
                                 .map(|m| Box::new(Val::String(m.clone().into()))),
                         );
@@ -154,10 +149,13 @@ impl WorkerLinker {
             move |mut store, _types, params, results| {
                 Box::new(async move {
                     if let Some(Val::Resource(r)) = params.get(0) {
-                        let resource =
-                            Resource::<HostAsset>::try_from_resource_any(*r, &mut store)?;
+                        let resource = Resource::<Asset>::try_from_resource_any(*r, &mut store)?;
+
                         let asset = store.data().table.get(&resource)?;
-                        let bytes = std::fs::read(&asset.src_path)?;
+                        let bytes = asset
+                            .bytes()
+                            .map_err(|e| wasmtime::Error::msg(e.to_string()))?;
+
                         results[0] = Val::List(bytes.iter().map(|b| Val::U8(*b)).collect());
                     }
                     Ok(())
@@ -171,8 +169,9 @@ impl WorkerLinker {
     /// Stub out `kyushu:worker/bundle`.
     /// Used at runtime as the bundle is already frozen in Wasm memory by Wizer.
     pub fn with_bundle_stub(mut self) -> Result<Self> {
-        let resource_ty = ResourceType::host::<HostAsset>();
         let mut instance = self.linker.instance("kyushu:worker/bundle")?;
+
+        let resource_ty = ResourceType::host::<Asset>();
 
         instance.resource("asset", resource_ty, |_, _| Ok(()))?;
 
@@ -222,12 +221,11 @@ mod tests {
     use super::*;
     use crate::assets::Asset;
 
-    fn make_worker_assets() -> WorkerAssets {
-        WorkerAssets::from(vec![Asset {
-            src_path: "/tmp/index.html".to_string(),
-            path: "/index.html".to_string(),
-            mime_type: Some("text/html".to_string()),
-        }])
+    fn make_assets() -> Vec<Asset> {
+        vec![Asset::from_path(
+            "/tmp",
+            std::path::Path::new("/tmp/index.html"),
+        )]
     }
 
     #[test]
@@ -255,10 +253,7 @@ mod tests {
         assert!(
             WorkerLinker::new()
                 .unwrap()
-                .with_bundle(
-                    "console.log('hello')".to_string(),
-                    Some(make_worker_assets())
-                )
+                .with_bundle("console.log('hello')".to_string(), Some(make_assets()))
                 .is_ok()
         );
     }

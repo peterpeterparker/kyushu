@@ -1,7 +1,7 @@
 use crate::assets::load_assets;
 use crate::config::{AssetsConfig, InputConfig, OutputConfig};
 use crate::javascript::bundle;
-use crate::worker::{WORKER_TEMPLATE, WorkerAssets, WorkerContext, WorkerLinker, WorkerVersion};
+use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerVersion};
 use anyhow::Result;
 use wasmtime::Store;
 use wasmtime_wizer::Wizer;
@@ -42,7 +42,7 @@ async fn bundle_js(
     let assets = assets_config
         .map(|config| {
             println!("Loading assets from {}...", config.dir());
-            load_assets(config.dir()).map(WorkerAssets::from)
+            load_assets(config.dir())
         })
         .transpose()?;
 

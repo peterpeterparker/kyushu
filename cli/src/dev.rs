@@ -2,7 +2,7 @@ use crate::assets::load_assets;
 use crate::config::{AssetsConfig, DevConfig, InputConfig, WorkerConfig};
 use crate::javascript::bundle;
 use crate::server;
-use crate::worker::{WORKER_TEMPLATE, WorkerAssets, WorkerContext, WorkerLinker, WorkerState};
+use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerState};
 use anyhow::Result;
 use notify::RecursiveMode;
 use notify_debouncer_mini::new_debouncer;
@@ -62,7 +62,7 @@ async fn build_instance_pre(
     let assets = assets_config
         .map(|config| {
             println!("Loading assets from {}...", config.dir());
-            load_assets(config.dir()).map(WorkerAssets::from)
+            load_assets(config.dir())
         })
         .transpose()?;
 
