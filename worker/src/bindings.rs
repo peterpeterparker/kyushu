@@ -86,25 +86,44 @@ pub mod kyushu {
             /// An optional list of static assets (HTML, CSS, images and other files)
             /// to upload as part of the Worker. Useful for implementating a static file
             /// server without IO interactions.
-            #[derive(Clone)]
+            ///
+            /// The asset is a handle allowing data and information to be fetched
+            /// on demand.
+            #[derive(Debug)]
+            #[repr(transparent)]
             pub struct Asset {
-                /// The absolute filesystem path used by the worker to load the file bytes during pre-initialization.
-                pub src_path: _rt::String,
-                /// The asset's URL path normalized with `/`-prefix
-                /// e.g. `/index.html` or `/images/hello.png`
-                pub path: _rt::String,
-                pub mime_type: Option<_rt::String>,
+                handle: _rt::Resource<Asset>,
             }
-            impl ::core::fmt::Debug for Asset {
-                fn fmt(
-                    &self,
-                    f: &mut ::core::fmt::Formatter<'_>,
-                ) -> ::core::fmt::Result {
-                    f.debug_struct("Asset")
-                        .field("src-path", &self.src_path)
-                        .field("path", &self.path)
-                        .field("mime-type", &self.mime_type)
-                        .finish()
+            impl Asset {
+                #[doc(hidden)]
+                pub unsafe fn from_handle(handle: u32) -> Self {
+                    Self {
+                        handle: unsafe { _rt::Resource::from_handle(handle) },
+                    }
+                }
+                #[doc(hidden)]
+                pub fn take_handle(&self) -> u32 {
+                    _rt::Resource::take_handle(&self.handle)
+                }
+                #[doc(hidden)]
+                pub fn handle(&self) -> u32 {
+                    _rt::Resource::handle(&self.handle)
+                }
+            }
+            unsafe impl _rt::WasmResource for Asset {
+                #[inline]
+                unsafe fn drop(_handle: u32) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    unreachable!();
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        #[link(wasm_import_module = "kyushu:worker/bundle")]
+                        unsafe extern "C" {
+                            #[link_name = "[resource-drop]asset"]
+                            fn drop(_: u32);
+                        }
+                        unsafe { drop(_handle) };
+                    }
                 }
             }
             #[allow(unused_unsafe, clippy::all)]
@@ -144,6 +163,139 @@ pub mod kyushu {
                     result5
                 }
             }
+            impl Asset {
+                #[allow(unused_unsafe, clippy::all)]
+                /// The asset's URL path normalized with `/`-prefix
+                /// e.g. `/index.html` or `/images/hello.png`
+                pub fn path(&self) -> _rt::String {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 2 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 2
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "kyushu:worker/bundle")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]asset.path"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = *ptr0.add(0).cast::<*mut u8>();
+                        let l3 = *ptr0
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let len4 = l3;
+                        let bytes4 = _rt::Vec::from_raw_parts(l2.cast(), len4, len4);
+                        let result5 = _rt::string_lift(bytes4);
+                        result5
+                    }
+                }
+            }
+            impl Asset {
+                #[allow(unused_unsafe, clippy::all)]
+                /// The mime type of the asset, if known.
+                pub fn mime_type(&self) -> Option<_rt::String> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 3 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 3
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "kyushu:worker/bundle")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]asset.mime-type"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result6 = match l2 {
+                            0 => None,
+                            1 => {
+                                let e = {
+                                    let l3 = *ptr0
+                                        .add(::core::mem::size_of::<*const u8>())
+                                        .cast::<*mut u8>();
+                                    let l4 = *ptr0
+                                        .add(2 * ::core::mem::size_of::<*const u8>())
+                                        .cast::<usize>();
+                                    let len5 = l4;
+                                    let bytes5 = _rt::Vec::from_raw_parts(
+                                        l3.cast(),
+                                        len5,
+                                        len5,
+                                    );
+                                    _rt::string_lift(bytes5)
+                                };
+                                Some(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result6
+                    }
+                }
+            }
+            impl Asset {
+                #[allow(unused_unsafe, clippy::all)]
+                /// The data of the asset.
+                pub fn bytes(&self) -> _rt::Vec<u8> {
+                    unsafe {
+                        #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
+                        #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
+                        struct RetArea(
+                            [::core::mem::MaybeUninit<
+                                u8,
+                            >; 2 * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 2
+                                * ::core::mem::size_of::<*const u8>()],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "kyushu:worker/bundle")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]asset.bytes"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = *ptr0.add(0).cast::<*mut u8>();
+                        let l3 = *ptr0
+                            .add(::core::mem::size_of::<*const u8>())
+                            .cast::<usize>();
+                        let len4 = l3;
+                        let result5 = _rt::Vec::from_raw_parts(l2.cast(), len4, len4);
+                        result5
+                    }
+                }
+            }
             #[allow(unused_unsafe, clippy::all)]
             pub fn get_assets() -> Option<_rt::Vec<Asset>> {
                 unsafe {
@@ -171,7 +323,7 @@ pub mod kyushu {
                     }
                     unsafe { wit_import1(ptr0) };
                     let l2 = i32::from(*ptr0.add(0).cast::<u8>());
-                    let result16 = match l2 {
+                    let result7 = match l2 {
                         0 => None,
                         1 => {
                             let e = {
@@ -181,81 +333,25 @@ pub mod kyushu {
                                 let l4 = *ptr0
                                     .add(2 * ::core::mem::size_of::<*const u8>())
                                     .cast::<usize>();
-                                let base15 = l3;
-                                let len15 = l4;
-                                let mut result15 = _rt::Vec::with_capacity(len15);
-                                for i in 0..len15 {
-                                    let base = base15
-                                        .add(i * (7 * ::core::mem::size_of::<*const u8>()));
-                                    let e15 = {
-                                        let l5 = *base.add(0).cast::<*mut u8>();
-                                        let l6 = *base
-                                            .add(::core::mem::size_of::<*const u8>())
-                                            .cast::<usize>();
-                                        let len7 = l6;
-                                        let bytes7 = _rt::Vec::from_raw_parts(
-                                            l5.cast(),
-                                            len7,
-                                            len7,
-                                        );
-                                        let l8 = *base
-                                            .add(2 * ::core::mem::size_of::<*const u8>())
-                                            .cast::<*mut u8>();
-                                        let l9 = *base
-                                            .add(3 * ::core::mem::size_of::<*const u8>())
-                                            .cast::<usize>();
-                                        let len10 = l9;
-                                        let bytes10 = _rt::Vec::from_raw_parts(
-                                            l8.cast(),
-                                            len10,
-                                            len10,
-                                        );
-                                        let l11 = i32::from(
-                                            *base
-                                                .add(4 * ::core::mem::size_of::<*const u8>())
-                                                .cast::<u8>(),
-                                        );
-                                        Asset {
-                                            src_path: _rt::string_lift(bytes7),
-                                            path: _rt::string_lift(bytes10),
-                                            mime_type: match l11 {
-                                                0 => None,
-                                                1 => {
-                                                    let e = {
-                                                        let l12 = *base
-                                                            .add(5 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<*mut u8>();
-                                                        let l13 = *base
-                                                            .add(6 * ::core::mem::size_of::<*const u8>())
-                                                            .cast::<usize>();
-                                                        let len14 = l13;
-                                                        let bytes14 = _rt::Vec::from_raw_parts(
-                                                            l12.cast(),
-                                                            len14,
-                                                            len14,
-                                                        );
-                                                        _rt::string_lift(bytes14)
-                                                    };
-                                                    Some(e)
-                                                }
-                                                _ => _rt::invalid_enum_discriminant(),
-                                            },
-                                        }
+                                let base6 = l3;
+                                let len6 = l4;
+                                let mut result6 = _rt::Vec::with_capacity(len6);
+                                for i in 0..len6 {
+                                    let base = base6.add(i * 4);
+                                    let e6 = {
+                                        let l5 = *base.add(0).cast::<i32>();
+                                        unsafe { Asset::from_handle(l5 as u32) }
                                     };
-                                    result15.push(e15);
+                                    result6.push(e6);
                                 }
-                                _rt::cabi_dealloc(
-                                    base15,
-                                    len15 * (7 * ::core::mem::size_of::<*const u8>()),
-                                    ::core::mem::size_of::<*const u8>(),
-                                );
-                                result15
+                                _rt::cabi_dealloc(base6, len6 * 4, 4);
+                                result6
                             };
                             Some(e)
                         }
                         _ => _rt::invalid_enum_discriminant(),
                     };
-                    result16
+                    result7
                 }
             }
         }
@@ -8691,29 +8787,6 @@ pub mod exports {
 #[rustfmt::skip]
 mod _rt {
     #![allow(dead_code, clippy::all)]
-    pub use alloc_crate::string::String;
-    pub use alloc_crate::vec::Vec;
-    pub unsafe fn string_lift(bytes: Vec<u8>) -> String {
-        if cfg!(debug_assertions) {
-            String::from_utf8(bytes).unwrap()
-        } else {
-            String::from_utf8_unchecked(bytes)
-        }
-    }
-    pub unsafe fn invalid_enum_discriminant<T>() -> T {
-        if cfg!(debug_assertions) {
-            panic!("invalid enum discriminant")
-        } else {
-            unsafe { core::hint::unreachable_unchecked() }
-        }
-    }
-    pub unsafe fn cabi_dealloc(ptr: *mut u8, size: usize, align: usize) {
-        if size == 0 {
-            return;
-        }
-        let layout = alloc::Layout::from_size_align_unchecked(size, align);
-        alloc::dealloc(ptr, layout);
-    }
     use core::fmt;
     use core::marker;
     use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
@@ -8787,6 +8860,29 @@ mod _rt {
                 }
             }
         }
+    }
+    pub use alloc_crate::string::String;
+    pub use alloc_crate::vec::Vec;
+    pub unsafe fn string_lift(bytes: Vec<u8>) -> String {
+        if cfg!(debug_assertions) {
+            String::from_utf8(bytes).unwrap()
+        } else {
+            String::from_utf8_unchecked(bytes)
+        }
+    }
+    pub unsafe fn invalid_enum_discriminant<T>() -> T {
+        if cfg!(debug_assertions) {
+            panic!("invalid enum discriminant")
+        } else {
+            unsafe { core::hint::unreachable_unchecked() }
+        }
+    }
+    pub unsafe fn cabi_dealloc(ptr: *mut u8, size: usize, align: usize) {
+        if size == 0 {
+            return;
+        }
+        let layout = alloc::Layout::from_size_align_unchecked(size, align);
+        alloc::dealloc(ptr, layout);
     }
     pub unsafe fn bool_lift(val: u8) -> bool {
         if cfg!(debug_assertions) {
@@ -8923,12 +9019,14 @@ pub(crate) use __export_worker_impl as export;
 #[unsafe(link_section = "component-type:wit-bindgen:0.41.0:kyushu:worker:worker:encoded world")]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7236] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xc77\x01A\x02\x01A*\x01\
-B\x09\x01ks\x01r\x03\x08src-paths\x04paths\x09mime-type\0\x04\0\x05asset\x03\0\x01\
-\x01@\0\0s\x04\0\x0aget-bundle\x01\x03\x01p\x02\x01k\x04\x01@\0\0\x05\x04\0\x0ag\
-et-assets\x01\x06\x03\0\x14kyushu:worker/bundle\x05\0\x01B\x0a\x04\0\x08pollable\
-\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\x02\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7322] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x9d8\x01A\x02\x01A*\x01\
+B\x11\x04\0\x05asset\x03\x01\x01h\0\x01@\x01\x04self\x01\0s\x04\0\x12[method]ass\
+et.path\x01\x02\x01ks\x01@\x01\x04self\x01\0\x03\x04\0\x17[method]asset.mime-typ\
+e\x01\x04\x01p}\x01@\x01\x04self\x01\0\x05\x04\0\x13[method]asset.bytes\x01\x06\x01\
+@\0\0s\x04\0\x0aget-bundle\x01\x07\x01i\0\x01p\x08\x01k\x09\x01@\0\0\x0a\x04\0\x0a\
+get-assets\x01\x0b\x03\0\x14kyushu:worker/bundle\x05\0\x01B\x0a\x04\0\x08pollabl\
+e\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\x02\
 \x01@\x01\x04self\x01\x01\0\x04\0\x16[method]pollable.block\x01\x03\x01p\x01\x01\
 py\x01@\x01\x02in\x04\0\x05\x04\0\x04poll\x01\x06\x03\0\x13wasi:io/poll@0.2.11\x05\
 \x01\x02\x03\0\x01\x08pollable\x01B\x0f\x02\x03\x02\x01\x02\x04\0\x08pollable\x03\
