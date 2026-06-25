@@ -36,20 +36,15 @@ pub async fn dev(
         println!("Live reload disabled.");
     }
 
-    let callback =
-        |(instance_pre, config, assets_config): (
-            Arc<RwLock<InstancePre<WorkerState>>>,
-            WorkerConfig,
-            Option<AssetsConfig>,
-        ),
-         req| async move { handle_request(instance_pre, config, assets_config, req).await };
+    let callback = |(instance_pre, config): (
+        Arc<RwLock<InstancePre<WorkerState>>>,
+        WorkerConfig,
+    ),
+                    req| async move {
+        handle_request(instance_pre, config, req).await
+    };
 
-    server::serve(
-        port,
-        (instance_pre, worker_config.clone(), assets_config.cloned()),
-        callback,
-    )
-    .await?;
+    server::serve(port, (instance_pre, worker_config.clone()), callback).await?;
 
     Ok(())
 }
@@ -74,7 +69,7 @@ async fn build_instance_pre(
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
         .with_http()?
-        .with_bundle(bundle_str)?
+        .with_bundle(bundle_str, assets)?
         .build();
 
     let component = Component::new(&engine, WORKER_TEMPLATE)
@@ -143,7 +138,6 @@ async fn watch(
 async fn handle_request(
     instance_pre: Arc<RwLock<InstancePre<WorkerState>>>,
     config: WorkerConfig,
-    assets_config: Option<AssetsConfig>,
     req: hyper::Request<hyper::body::Incoming>,
 ) -> Result<hyper::Response<HyperOutgoingBody>> {
     let instance_pre = instance_pre.read().await.clone();
