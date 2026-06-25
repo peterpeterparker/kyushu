@@ -15,7 +15,6 @@ impl Asset {
         }
     }
 
-
     pub fn path(&self) -> String {
         let rel = Path::new(&self.src_path)
             .strip_prefix(&self.base)
