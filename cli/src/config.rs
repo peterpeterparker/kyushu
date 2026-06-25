@@ -10,6 +10,7 @@ pub struct KyuConfig {
     pub run: Option<RunConfig>,
     pub input: Option<InputConfig>,
     pub output: Option<OutputConfig>,
+    pub assets: Option<AssetsConfig>,
     pub worker: Option<WorkerConfig>,
 }
 
@@ -34,6 +35,11 @@ pub struct InputConfig {
 pub struct OutputConfig {
     pub dir: Option<String>,
     pub file: Option<String>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+pub struct AssetsConfig {
+    pub dir: String,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -95,5 +101,19 @@ impl OutputConfig {
 
     pub fn worker_wasm(&self) -> String {
         format!("{}/{}", self.dir(), self.file())
+    }
+}
+
+impl AssetsConfig {
+    pub fn dir(&self) -> &str {
+        &self.dir
+    }
+
+    pub fn to_mount(&self) -> MountConfig {
+        MountConfig {
+            host: self.dir.clone(),
+            guest: self.dir.clone(),
+            writable: false,
+        }
     }
 }
