@@ -1,4 +1,6 @@
 import {
+  EnvAssetsSchema,
+  EnvSchema,
   ExportedHandlerSchema,
   WorkerMethodSchema,
   WorkerRequestSchema,
@@ -144,5 +146,54 @@ describe("ExportedHandlerSchema", () => {
 
   it("rejects non-function fetch", () => {
     expect(() => ExportedHandlerSchema.parse({ fetch: "not-a-function" })).toThrow();
+  });
+});
+
+describe("EnvAssetsSchema", () => {
+  it("accepts valid assets", () => {
+    expect(() =>
+      EnvAssetsSchema.parse({ fetch: async (_req: unknown) => ({ status: 200 }) }),
+    ).not.toThrow();
+  });
+
+  it("rejects missing fetch", () => {
+    expect(() => EnvAssetsSchema.parse({})).toThrow();
+  });
+
+  it("rejects non-function fetch", () => {
+    expect(() => EnvAssetsSchema.parse({ fetch: "not-a-function" })).toThrow();
+  });
+
+  it("rejects extra keys", () => {
+    expect(() =>
+      EnvAssetsSchema.parse({
+        fetch: async (_req: unknown) => ({ status: 200 }),
+        extra: "field",
+      }),
+    ).toThrow();
+  });
+});
+
+describe("EnvSchema", () => {
+  it("accepts empty env", () => {
+    expect(() => EnvSchema.parse({})).not.toThrow();
+  });
+
+  it("accepts env with ASSETS", () => {
+    expect(() =>
+      EnvSchema.parse({ ASSETS: { fetch: async (_req: unknown) => ({ status: 200 }) } }),
+    ).not.toThrow();
+  });
+
+  it("accepts env without ASSETS", () => {
+    expect(() => EnvSchema.parse({ ASSETS: undefined })).not.toThrow();
+  });
+
+  it("rejects extra keys", () => {
+    expect(() => EnvSchema.parse({ extra: "field" })).toThrow();
+  });
+
+  it("rejects invalid ASSETS", () => {
+    expect(() => EnvSchema.parse({ ASSETS: { fetch: "not-a-function" } })).toThrow();
   });
 });
