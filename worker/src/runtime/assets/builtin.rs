@@ -1,4 +1,4 @@
-use crate::runtime::assets::state::{ASSETS, AssetEntry};
+use crate::runtime::assets::state::{ASSETS, Asset};
 use rquickjs::{Ctx, Error as JsError, IntoJs, Object, Result as JsResult, TypedArray, Value};
 
 pub struct JsAsset<'js> {
@@ -16,7 +16,7 @@ impl<'js> IntoJs<'js> for JsAsset<'js> {
 }
 
 impl<'js> JsAsset<'js> {
-    pub fn from_asset(ctx: &Ctx<'js>, asset: &AssetEntry) -> JsResult<Self> {
+    pub fn from_asset(ctx: &Ctx<'js>, asset: &Asset) -> JsResult<Self> {
         Ok(Self {
             bytes: TypedArray::new(ctx.clone(), asset.bytes.as_slice())?,
             mime_type: asset.mime_type.clone(),

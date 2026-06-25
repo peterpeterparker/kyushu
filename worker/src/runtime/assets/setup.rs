@@ -1,12 +1,12 @@
 use crate::bindings::kyushu::worker::bundle::get_assets;
-use crate::runtime::assets::state::{ASSETS, AssetEntry};
+use crate::runtime::assets::state::{ASSETS, Asset};
 
 pub fn load_assets() {
     let Some(assets) = get_assets() else { return };
 
     let loaded = assets
         .into_iter()
-        .map(|asset| AssetEntry {
+        .map(|asset| Asset {
             path: asset.path(),
             bytes: asset.bytes(),
             mime_type: asset.mime_type(),
