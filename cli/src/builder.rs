@@ -52,7 +52,7 @@ async fn bundle_js(
     // via a custom host import (`kyushu:worker/bundle#get-bundle`), stores it in a
     // static OnceLock, then snapshots the Wasm memory state.
     //
-    // We use a custom host import instead of WASI filesystem or env vars to avoid
+    // ⚠️ We use a custom host import instead of WASI filesystem or env vars to avoid
     // polluting the Wizer snapshot with build-time WASI state (preopened dirs, env vars)
     // which would override the runtime state provided by `kyu run`.
     println!("Pre-initializing worker Wasm...");
@@ -63,14 +63,8 @@ async fn bundle_js(
         .with_bundle(bundle_str, assets)?
         .build();
 
-    // WASI context with preopened dirs in case there is assets to load.
-    // No other mounts or env vars.
-    let mounts = assets_config.map(|config| vec![config.to_mount()]);
-
-    let mut store = Store::new(
-        &engine,
-        WorkerContext::new().with_mounts(mounts.as_ref())?.build(),
-    );
+    // Empty WASI context — no preopened dirs or env vars to snapshot.
+    let mut store = Store::new(&engine, WorkerContext::new().build());
 
     let initialized = Wizer::new()
         .keep_init_func(true)
