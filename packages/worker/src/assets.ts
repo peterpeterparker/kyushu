@@ -44,12 +44,10 @@ const aliasesOf = ({ pathname }: Pick<URL, "pathname">): [string, ...string[]] |
   }
 };
 
-const resolveAsset = ({
-  pathname,
-}: Pick<URL, "pathname">): { bytes: Uint8Array; mimeType?: string } | null => {
+const resolveAsset = ({ pathname }: Pick<URL, "pathname">): Asset | undefined => {
   const asset = __kyushu_get_asset__(pathname);
 
-  if (asset !== null) {
+  if (asset !== undefined) {
     return asset;
   }
 
@@ -58,23 +56,20 @@ const resolveAsset = ({
   for (const alias of aliases ?? []) {
     const aliasAsset = __kyushu_get_asset__(alias);
 
-    if (aliasAsset !== null) {
+    if (aliasAsset !== undefined) {
       return aliasAsset;
     }
   }
 
-  return null;
+  return undefined;
 };
 
 const resolveCompressedAsset = ({
   pathname,
   headers,
-}: Pick<URL, "pathname"> & { headers: WorkerRequest["headers"] }): {
-  bytes: Uint8Array;
-  mimeType?: string;
-} | null => {
+}: Pick<URL, "pathname"> & { headers: WorkerRequest["headers"] }): Asset | undefined => {
   if (headers?.["accept-encoding"]?.includes("br") !== true) {
-    return null;
+    return undefined;
   }
 
   return __kyushu_get_asset__(`${pathname}.br`);
@@ -90,11 +85,12 @@ const buildResponse = ({
   ifNoneMatch,
 }: {
   asset: Asset;
-  compressedAsset: Asset | null;
+  compressedAsset: Asset | undefined;
   method: Extract<WorkerMethod, "GET" | "HEAD">;
   ifNoneMatch: Etag | undefined;
 } & Pick<URL, "pathname">): WorkerResponse => {
-  const { bytes, mimeType } = compressedAsset ?? asset;
+  const { bytes } = compressedAsset ?? asset;
+  const { mimeType } = asset;
 
   const etag = `"${createHash("md5").update(bytes).digest("hex")}"`;
 
@@ -123,7 +119,7 @@ const buildResponse = ({
           : // TODO: should we deal with custom mime types?
             (CUSTOM_MIME_TYPES[pathname] ?? "application/octet-stream"),
       "content-length": `${bytes.length}`,
-      ...(compressedAsset !== null && {
+      ...(compressedAsset !== undefined && {
         "content-encoding": "br",
       }),
     },
@@ -153,7 +149,7 @@ export const fetch: EnvAssets["fetch"] = async ({ url: requestUrl, headers, meth
 
   const { result: asset } = assetResult;
 
-  if (asset === null) {
+  if (asset === undefined) {
     return { status: 404, body: "Not Found" };
   }
 

@@ -8,11 +8,11 @@ declare global {
   }
 
   /**
-   * Returns the asset at the given path, or `null` if not found.
+   * Returns the asset at the given path, or `undefined` if not found.
    *
    * @throws If no assets are configured.
    */
-  function __kyushu_get_asset__(path: string): Asset | null;
+  function __kyushu_get_asset__(path: string): Asset | undefined;
 
   /**
    * Returns `true` if static assets are configured for this worker.
