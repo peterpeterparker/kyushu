@@ -1,12 +1,15 @@
+use crate::config::{AssetsConfig, InputConfig, OutputConfig};
+use crate::javascript::bundle;
+use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerVersion};
 use anyhow::Result;
 use wasmtime::Store;
 use wasmtime_wizer::Wizer;
 
-use crate::config::{InputConfig, OutputConfig};
-use crate::javascript::bundle;
-use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerVersion};
-
-pub async fn build(input_config: &InputConfig, output_config: &OutputConfig) -> Result<()> {
+pub async fn build(
+    input_config: &InputConfig,
+    output_config: &OutputConfig,
+    _assets_config: Option<&AssetsConfig>,
+) -> Result<()> {
     WorkerVersion::new()
         .with_bytes(WORKER_TEMPLATE)
         .print()

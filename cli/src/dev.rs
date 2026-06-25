@@ -1,4 +1,4 @@
-use crate::config::{DevConfig, InputConfig, WorkerConfig};
+use crate::config::{AssetsConfig, DevConfig, InputConfig, WorkerConfig};
 use crate::javascript::bundle;
 use crate::server;
 use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerState};
@@ -16,6 +16,7 @@ use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 pub async fn dev(
     dev_config: &DevConfig,
     input_config: &InputConfig,
+    _assets_config: Option<&AssetsConfig>,
     worker_config: &WorkerConfig,
 ) -> Result<()> {
     let port = dev_config.port();
