@@ -3,7 +3,7 @@ use crate::worker::state::WorkerState;
 use anyhow::Result;
 use std::sync::Arc;
 use wasmtime::Engine;
-use wasmtime::component::{Linker, Resource, ResourceType, Val};
+use wasmtime::component::{Linker, LinkerInstance, Resource, ResourceType, Val};
 use wasmtime_wasi::p2::add_to_linker_async;
 use wasmtime_wasi_http::p2::add_only_http_to_linker_async;
 
@@ -61,6 +61,16 @@ impl WorkerLinker {
     pub fn with_bundle(mut self, bundle: String, assets: Option<Vec<Asset>>) -> Result<Self> {
         let mut instance = self.linker.instance("kyushu:worker/bundle")?;
 
+        Self::register_bundle_js(&mut instance, bundle)?;
+        Self::register_bundle_assets(&mut instance, assets)?;
+
+        Ok(self)
+    }
+
+    fn register_bundle_js(
+        instance: &mut LinkerInstance<WorkerState>,
+        bundle: String,
+    ) -> Result<()> {
         instance.func_new_async("get-bundle", move |_store, _types, _params, results| {
             let bundle = bundle.clone();
             Box::new(async move {
@@ -69,8 +79,14 @@ impl WorkerLinker {
             })
         })?;
 
-        let assets = Arc::new(assets);
+        Ok(())
+    }
 
+    fn register_bundle_assets(
+        instance: &mut LinkerInstance<WorkerState>,
+        assets: Option<Vec<Asset>>,
+    ) -> Result<()> {
+        let assets = Arc::new(assets);
         let resource_ty = ResourceType::host::<Asset>();
 
         instance.resource("asset", resource_ty, |mut store, rep| {
@@ -85,22 +101,16 @@ impl WorkerLinker {
             let assets = assets.clone();
             Box::new(async move {
                 let assets = Arc::try_unwrap(assets).unwrap_or_else(|arc| (*arc).clone());
-
                 let Some(assets) = assets else {
                     results[0] = Val::Option(None);
                     return Ok(());
                 };
-
-                let handles = assets
-                    .iter()
-                    .map(|asset| {
-                        let resource = store.data_mut().table.push(asset.clone())?;
-                        let resource_any = resource.try_into_resource_any(&mut store)?;
-                        Ok(Val::Resource(resource_any))
-                    })
-                    .collect::<anyhow::Result<Vec<Val>>>()
-                    .map_err(|e| wasmtime::Error::msg(e.to_string()))?;
-
+                let mut handles = Vec::with_capacity(assets.len());
+                for asset in assets {
+                    let resource = store.data_mut().table.push(asset)?;
+                    let resource_any = resource.try_into_resource_any(&mut store)?;
+                    handles.push(Val::Resource(resource_any));
+                }
                 results[0] = Val::Option(Some(Box::new(Val::List(handles))));
                 Ok(())
             })
@@ -121,7 +131,7 @@ impl WorkerLinker {
             results[0] = Val::List(bytes.iter().map(|b| Val::U8(*b)).collect());
         });
 
-        Ok(self)
+        Ok(())
     }
 
     /// Stub out `kyushu:worker/bundle`.
@@ -129,13 +139,24 @@ impl WorkerLinker {
     pub fn with_bundle_stub(mut self) -> Result<Self> {
         let mut instance = self.linker.instance("kyushu:worker/bundle")?;
 
-        let resource_ty = ResourceType::host::<Asset>();
+        Self::register_bundle_js_stub(&mut instance)?;
+        Self::register_bundle_assets_stub(&mut instance)?;
 
-        instance.resource("asset", resource_ty, |_, _| Ok(()))?;
+        Ok(self)
+    }
 
+    fn register_bundle_js_stub(instance: &mut LinkerInstance<WorkerState>) -> Result<()> {
         instance.func_new_async("get-bundle", |_store, _types, _params, _results| {
             Box::new(async move { Ok(()) })
         })?;
+
+        Ok(())
+    }
+
+    fn register_bundle_assets_stub(instance: &mut LinkerInstance<WorkerState>) -> Result<()> {
+        let resource_ty = ResourceType::host::<Asset>();
+
+        instance.resource("asset", resource_ty, |_, _| Ok(()))?;
 
         instance.func_new_async("get-assets", |_store, _types, _params, _results| {
             Box::new(async move { Ok(()) })
@@ -155,7 +176,7 @@ impl WorkerLinker {
             |_store, _types, _params, _results| Box::new(async move { Ok(()) }),
         )?;
 
-        Ok(self)
+        Ok(())
     }
 
     /// Register `wasi:http` interfaces required by the worker component.
