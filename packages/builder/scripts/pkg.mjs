@@ -13,8 +13,6 @@ const readPackageJson = () => {
   };
 };
 
-const { peerDependencies, exports } = readPackageJson();
+const { peerDependencies } = readPackageJson();
 
 export const externalPeerDependencies = Object.keys(peerDependencies);
-
-export const workspaceExports = exports;
