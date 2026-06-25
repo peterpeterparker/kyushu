@@ -1,8 +1,18 @@
 use crate::bindings;
+use crate::runtime as worker_runtime;
 
 const TYPES_BUNDLE: &str = include_str!("../../packages/types/dist/index.mjs");
 
 pub fn initialize() {
+    // Load static assets from the filesystem into memory before wizer_initialize()
+    // so they are frozen into the Wasm snapshot and available at runtime without IO.
+    //
+    // Note: Assets are stored in Rust static memory rather than QuickJS heap to avoid
+    // the hostcall fuel exhaustion that occurs when transferring large binary data
+    // through the WIT interface during pre-initialization.
+    worker_runtime::load_assets();
+    kyushu_runtime::add_additional_function(Box::new(|ctx| worker_runtime::init_get_asset(ctx)));
+
     // Register @kyushu/types and @kyushu/app as builtin modules before wizer_initialize()
     // so they are wired into the QuickJS resolver and loader alongside the polyfill's
     // own modules, making them importable from the worker's fetch handler.
