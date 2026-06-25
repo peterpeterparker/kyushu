@@ -1,0 +1,10 @@
+{
+  "name": "kyushu-builder",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "author": "David Dal Busco (https://daviddalbusco.com)",
+  "devDependencies": {
+    "esbuild": "^0.28.0"
+  }
+}

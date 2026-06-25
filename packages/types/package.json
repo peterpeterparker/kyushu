@@ -33,9 +33,9 @@
     }
   },
   "scripts": {
-    "rmdir": "node ./scripts/rmdir.mjs",
+    "rmdir": "node ../builder/scripts/rmdir.mjs",
     "ts-declaration": "tsc --emitDeclarationOnly --outDir dist/types",
-    "build": "pnpm run rmdir && mkdir -p dist && node ./scripts/esbuild.mjs && pnpm run ts-declaration",
+    "build": "pnpm run rmdir && mkdir -p dist && node ../builder/scripts/esbuild.mjs && pnpm run ts-declaration",
     "prepack": "npm run build",
     "test": "tsc --project tsconfig.spec.json --noEmit && vitest"
   },
