@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use config::KyuConfig;
 
+mod assets;
 mod builder;
 mod config;
 mod dev;
