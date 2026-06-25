@@ -1,15 +1,21 @@
-use std::sync::Arc;
 use crate::worker::WorkerAssets;
 use crate::worker::state::WorkerState;
 use anyhow::Result;
+use std::sync::Arc;
 use wasmtime::Engine;
-use wasmtime::component::{Linker, Val};
+use wasmtime::component::{Linker, Resource, ResourceType, Val};
 use wasmtime_wasi::p2::add_to_linker_async;
 use wasmtime_wasi_http::p2::add_only_http_to_linker_async;
 
 pub struct WorkerLinker {
     engine: Engine,
     linker: Linker<WorkerState>,
+}
+
+struct HostAsset {
+    pub path: String,
+    pub src_path: String,
+    pub mime_type: Option<String>,
 }
 
 impl WorkerLinker {
@@ -70,26 +76,94 @@ impl WorkerLinker {
         })?;
 
         let assets = Arc::new(assets);
-        let assets_for_bytes = assets.clone();
 
-        instance.func_new_async("get-assets", move |_store, _types, _params, results| {
-            let val = assets.as_ref().as_ref().map_or(Val::Option(None), |a| a.to_val());
+        let resource_ty = ResourceType::host::<HostAsset>();
+
+        instance.resource("asset", resource_ty, |mut store, rep| {
+            store
+                .data_mut()
+                .table
+                .delete(Resource::<HostAsset>::new_own(rep))?;
+            Ok(())
+        })?;
+
+        instance.func_new_async("get-assets", move |mut store, _types, _params, results| {
+            let assets = assets.clone();
             Box::new(async move {
-                results[0] = val;
+                match assets.as_ref() {
+                    None => results[0] = Val::Option(None),
+                    Some(worker_assets) => {
+                        let handles = worker_assets
+                            .0
+                            .iter()
+                            .map(|asset| {
+                                let resource = store.data_mut().table.push(HostAsset {
+                                    path: asset.path.clone(),
+                                    src_path: asset.src_path.clone(),
+                                    mime_type: asset.mime_type.clone(),
+                                })?;
+                                let resource_any = resource.try_into_resource_any(&mut store)?;
+                                Ok(Val::Resource(resource_any))
+                            })
+                            .collect::<anyhow::Result<Vec<Val>>>()
+                            .map_err(|e| wasmtime::Error::msg(e.to_string()))?;
+                        results[0] = Val::Option(Some(Box::new(Val::List(handles))));
+                    }
+                }
                 Ok(())
             })
         })?;
 
-        instance.func_new_async("get-asset-bytes", move |_store, _types, params, results| {
-            let val = match (assets_for_bytes.as_ref().as_ref(), params.get(0)) {
-                (Some(assets), Some(Val::String(path))) => assets.get_bytes(path.as_str()),
-                _ => Val::Option(None),
-            };
-            Box::new(async move {
-                results[0] = val;
-                Ok(())
-            })
-        })?;
+        instance.func_new_async(
+            "[method]asset.path",
+            move |mut store, _types, params, results| {
+                Box::new(async move {
+                    if let Some(Val::Resource(r)) = params.get(0) {
+                        let resource =
+                            Resource::<HostAsset>::try_from_resource_any(*r, &mut store)?;
+                        let asset = store.data().table.get(&resource)?;
+                        results[0] = Val::String(asset.path.clone().into());
+                    }
+                    Ok(())
+                })
+            },
+        )?;
+
+        instance.func_new_async(
+            "[method]asset.mime-type",
+            move |mut store, _types, params, results| {
+                Box::new(async move {
+                    if let Some(Val::Resource(r)) = params.get(0) {
+                        let resource =
+                            Resource::<HostAsset>::try_from_resource_any(*r, &mut store)?;
+                        let asset = store.data().table.get(&resource)?;
+                        results[0] = Val::Option(
+                            asset
+                                .mime_type
+                                .as_ref()
+                                .map(|m| Box::new(Val::String(m.clone().into()))),
+                        );
+                    }
+                    Ok(())
+                })
+            },
+        )?;
+
+        instance.func_new_async(
+            "[method]asset.bytes",
+            move |mut store, _types, params, results| {
+                Box::new(async move {
+                    if let Some(Val::Resource(r)) = params.get(0) {
+                        let resource =
+                            Resource::<HostAsset>::try_from_resource_any(*r, &mut store)?;
+                        let asset = store.data().table.get(&resource)?;
+                        let bytes = std::fs::read(&asset.src_path)?;
+                        results[0] = Val::List(bytes.iter().map(|b| Val::U8(*b)).collect());
+                    }
+                    Ok(())
+                })
+            },
+        )?;
 
         Ok(self)
     }
@@ -97,7 +171,10 @@ impl WorkerLinker {
     /// Stub out `kyushu:worker/bundle`.
     /// Used at runtime as the bundle is already frozen in Wasm memory by Wizer.
     pub fn with_bundle_stub(mut self) -> Result<Self> {
+        let resource_ty = ResourceType::host::<HostAsset>();
         let mut instance = self.linker.instance("kyushu:worker/bundle")?;
+
+        instance.resource("asset", resource_ty, |_, _| Ok(()))?;
 
         instance.func_new_async("get-bundle", |_store, _types, _params, _results| {
             Box::new(async move { Ok(()) })
@@ -107,9 +184,19 @@ impl WorkerLinker {
             Box::new(async move { Ok(()) })
         })?;
 
-        instance.func_new_async("get-asset-bytes", |_store, _types, _params, _results| {
+        instance.func_new_async("[method]asset.path", |_store, _types, _params, _results| {
             Box::new(async move { Ok(()) })
         })?;
+
+        instance.func_new_async(
+            "[method]asset.mime-type",
+            |_store, _types, _params, _results| Box::new(async move { Ok(()) }),
+        )?;
+
+        instance.func_new_async(
+            "[method]asset.bytes",
+            |_store, _types, _params, _results| Box::new(async move { Ok(()) }),
+        )?;
 
         Ok(self)
     }

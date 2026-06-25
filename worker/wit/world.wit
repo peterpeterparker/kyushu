@@ -9,17 +9,20 @@ interface bundle {
   /// An optional list of static assets (HTML, CSS, images and other files)
   /// to upload as part of the Worker. Useful for implementating a static file
   /// server without IO interactions.
-  record asset {
-    /// The absolute filesystem path used by the worker to load the file bytes during pre-initialization.
-    src-path: string,
+  ///
+  /// The asset is a handle allowing data and information to be fetched
+  /// on demand.
+  resource asset {
     /// The asset's URL path normalized with `/`-prefix
     /// e.g. `/index.html` or `/images/hello.png`
-    path: string,
-    mime-type: option<string>,
+    path: func() -> string;
+    /// The mime type of the asset, if known.
+    mime-type: func() -> option<string>;
+    // The data of the asset.
+    bytes: func() -> list<u8>;
   }
 
   get-assets: func() -> option<list<asset>>;
-  get-asset-bytes: func(path: string) -> option<list<u8>>;
 }
 
 world worker {

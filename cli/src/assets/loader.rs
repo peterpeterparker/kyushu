@@ -25,7 +25,7 @@ impl Asset {
             src_path,
             path,
             mime_type,
-            bytes
+            bytes,
         })
     }
 }

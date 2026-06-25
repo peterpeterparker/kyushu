@@ -1,7 +1,7 @@
 use crate::assets::Asset;
 use wasmtime::component::Val;
 
-pub struct WorkerAssets(Vec<Asset>);
+pub struct WorkerAssets(pub Vec<Asset>);
 
 impl From<Vec<Asset>> for WorkerAssets {
     fn from(assets: Vec<Asset>) -> Self {
@@ -38,11 +38,11 @@ impl WorkerAssets {
     }
 
     pub fn get_bytes(&self, path: &str) -> Val {
-        let result = self.0.iter().find(|a| a.path == path).map(|a| {
-            Box::new(Val::List(
-                a.bytes.iter().map(|b| Val::U8(*b)).collect(),
-            ))
-        });
+        let result = self
+            .0
+            .iter()
+            .find(|a| a.path == path)
+            .map(|a| Box::new(Val::List(a.bytes.iter().map(|b| Val::U8(*b)).collect())));
 
         Val::Option(result)
     }
