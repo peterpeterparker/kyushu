@@ -104,7 +104,7 @@ export interface EnvAssets {
  * The environment object passed to the worker's fetch handler.
  */
 export interface Env {
-  /** Static assets are available when `[assets]` is configured in `kyu.json` and loaded at build time. */
+  /** Static assets are available when `[assets]` is configured. */
   ASSETS?: EnvAssets;
 }
 
