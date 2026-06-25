@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use crate::worker::WorkerAssets;
 use crate::worker::state::WorkerState;
 use anyhow::Result;
@@ -68,8 +69,22 @@ impl WorkerLinker {
             })
         })?;
 
+        let assets = Arc::new(assets);
+        let assets_for_bytes = assets.clone();
+
         instance.func_new_async("get-assets", move |_store, _types, _params, results| {
-            let val = assets.as_ref().map_or(Val::Option(None), |a| a.to_val());
+            let val = assets.as_ref().as_ref().map_or(Val::Option(None), |a| a.to_val());
+            Box::new(async move {
+                results[0] = val;
+                Ok(())
+            })
+        })?;
+
+        instance.func_new_async("get-asset-bytes", move |_store, _types, params, results| {
+            let val = match (assets_for_bytes.as_ref().as_ref(), params.get(0)) {
+                (Some(assets), Some(Val::String(path))) => assets.get_bytes(path.as_str()),
+                _ => Val::Option(None),
+            };
             Box::new(async move {
                 results[0] = val;
                 Ok(())
@@ -89,6 +104,10 @@ impl WorkerLinker {
         })?;
 
         instance.func_new_async("get-assets", |_store, _types, _params, _results| {
+            Box::new(async move { Ok(()) })
+        })?;
+
+        instance.func_new_async("get-asset-bytes", |_store, _types, _params, _results| {
             Box::new(async move { Ok(()) })
         })?;
 

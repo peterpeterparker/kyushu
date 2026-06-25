@@ -1,4 +1,4 @@
-use crate::bindings::kyushu::worker::bundle::get_assets;
+use crate::bindings::kyushu::worker::bundle::{get_asset_bytes, get_assets};
 use crate::runtime::assets::state::{ASSETS, AssetEntry};
 
 pub fn load_assets() {
@@ -7,8 +7,8 @@ pub fn load_assets() {
     let loaded = assets
         .iter()
         .map(|asset| {
-            let bytes = std::fs::read(&asset.src_path)
-                .unwrap_or_else(|e| panic!("Failed to read asset '{}': {e}", asset.src_path));
+            let bytes = get_asset_bytes(&asset.path)
+                .unwrap_or_else(|| panic!("Failed to get bytes for asset '{}'", asset.path));
 
             AssetEntry {
                 path: asset.path.clone(),

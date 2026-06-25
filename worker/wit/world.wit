@@ -19,6 +19,7 @@ interface bundle {
   }
 
   get-assets: func() -> option<list<asset>>;
+  get-asset-bytes: func(path: string) -> option<list<u8>>;
 }
 
 world worker {

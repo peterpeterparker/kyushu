@@ -36,6 +36,16 @@ impl WorkerAssets {
 
         Val::Option(Some(Box::new(Val::List(vals))))
     }
+
+    pub fn get_bytes(&self, path: &str) -> Val {
+        let result = self.0.iter().find(|a| a.path == path).map(|a| {
+            Box::new(Val::List(
+                a.bytes.iter().map(|b| Val::U8(*b)).collect(),
+            ))
+        });
+
+        Val::Option(result)
+    }
 }
 
 #[cfg(test)]

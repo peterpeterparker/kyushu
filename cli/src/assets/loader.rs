@@ -7,6 +7,7 @@ pub struct Asset {
     pub src_path: String,
     pub path: String,
     pub mime_type: Option<String>,
+    pub bytes: Vec<u8>,
 }
 
 impl Asset {
@@ -18,10 +19,13 @@ impl Asset {
 
         let mime_type = from_path(abs_path).first().map(|m| m.to_string());
 
+        let bytes = std::fs::read(abs_path)?;
+
         Ok(Self {
             src_path,
             path,
             mime_type,
+            bytes
         })
     }
 }
