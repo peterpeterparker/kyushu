@@ -6,6 +6,7 @@ use anyhow::Result;
 use wasmtime::Store;
 use wasmtime_wizer::Wizer;
 
+
 pub async fn build(
     input_config: &InputConfig,
     output_config: &OutputConfig,
