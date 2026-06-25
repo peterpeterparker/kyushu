@@ -1,5 +1,5 @@
 use crate::assets::load_assets;
-use crate::config::{AssetsConfig, DevConfig, InputConfig, WorkerConfig};
+use crate::config::{AssetsConfig, DevConfig, InputConfig, MountConfig, WorkerConfig};
 use crate::javascript::bundle;
 use crate::server;
 use crate::worker::{WORKER_TEMPLATE, WorkerAssets, WorkerContext, WorkerLinker, WorkerState};
@@ -74,7 +74,7 @@ async fn build_instance_pre(
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
         .with_http()?
-        .with_bundle(bundle_str)?
+        .with_bundle(bundle_str, assets)?
         .build();
 
     let component = Component::new(&engine, WORKER_TEMPLATE)
@@ -148,11 +148,19 @@ async fn handle_request(
 ) -> Result<hyper::Response<HyperOutgoingBody>> {
     let instance_pre = instance_pre.read().await.clone();
 
+    let all_mounts: Vec<MountConfig> = config
+        .mounts
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .chain(assets_config.map(|c| c.to_mount()))
+        .collect();
+
     let mut store = Store::new(
         instance_pre.engine(),
         WorkerContext::new()
             .inherit_stdio()
-            .with_mounts(config.mounts.as_ref())?
+            .with_mounts((!all_mounts.is_empty()).then_some(&all_mounts))?
             .with_envs(config.env.as_ref())
             .build(),
     );

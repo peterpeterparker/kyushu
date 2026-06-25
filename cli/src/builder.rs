@@ -39,7 +39,7 @@ async fn bundle_js(
     let bundle_str = bundle(src).await?;
 
     // Load the static assets if a related source directory is provided.
-    let _assets = assets_config
+    let assets = assets_config
         .map(|config| {
             println!("Loading assets from {}...", config.dir());
             load_assets(config.dir()).map(WorkerAssets::from)
@@ -60,11 +60,17 @@ async fn bundle_js(
     let (engine, linker) = WorkerLinker::new()?
         .with_logging()?
         .with_http()?
-        .with_bundle(bundle_str)?
+        .with_bundle(bundle_str, assets)?
         .build();
 
-    // Empty WASI context — no preopened dirs or env vars to snapshot.
-    let mut store = Store::new(&engine, WorkerContext::new().build());
+    // WASI context with preopened dirs in case there is assets to load.
+    // No other mounts or env vars.
+    let mounts = assets_config.map(|config| vec![config.to_mount()]);
+
+    let mut store = Store::new(
+        &engine,
+        WorkerContext::new().with_mounts(mounts.as_ref())?.build(),
+    );
 
     let initialized = Wizer::new()
         .keep_init_func(true)

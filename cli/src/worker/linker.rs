@@ -1,3 +1,4 @@
+use crate::worker::WorkerAssets;
 use crate::worker::state::WorkerState;
 use anyhow::Result;
 use wasmtime::Engine;
@@ -54,29 +55,43 @@ impl WorkerLinker {
         Ok(self)
     }
 
-    /// Provide the JS bundle via `kyushu:worker/bundle#get-bundle`.
+    /// Provide the JS bundle and assets via `kyushu:worker/bundle`.
     /// Used during `kyu build`. Wizer calls this to get the JS bundle during pre-initialization.
-    pub fn with_bundle(mut self, bundle: String) -> Result<Self> {
-        self.linker
-            .instance("kyushu:worker/bundle")?
-            .func_new_async("get-bundle", move |_store, _types, _params, results| {
-                let bundle = bundle.clone();
-                Box::new(async move {
-                    results[0] = Val::String(bundle.into());
-                    Ok(())
-                })
-            })?;
+    pub fn with_bundle(mut self, bundle: String, assets: Option<WorkerAssets>) -> Result<Self> {
+        let mut instance = self.linker.instance("kyushu:worker/bundle")?;
+
+        instance.func_new_async("get-bundle", move |_store, _types, _params, results| {
+            let bundle = bundle.clone();
+            Box::new(async move {
+                results[0] = Val::String(bundle.into());
+                Ok(())
+            })
+        })?;
+
+        instance.func_new_async("get-assets", move |_store, _types, _params, results| {
+            let val = assets.as_ref().map_or(Val::Option(None), |a| a.to_val());
+            Box::new(async move {
+                results[0] = val;
+                Ok(())
+            })
+        })?;
+
         Ok(self)
     }
 
-    /// Stub out `kyushu:worker/bundle#get-bundle`.
+    /// Stub out `kyushu:worker/bundle`.
     /// Used at runtime as the bundle is already frozen in Wasm memory by Wizer.
     pub fn with_bundle_stub(mut self) -> Result<Self> {
-        self.linker
-            .instance("kyushu:worker/bundle")?
-            .func_new_async("get-bundle", |_store, _types, _params, _results| {
-                Box::new(async move { Ok(()) })
-            })?;
+        let mut instance = self.linker.instance("kyushu:worker/bundle")?;
+
+        instance.func_new_async("get-bundle", |_store, _types, _params, _results| {
+            Box::new(async move { Ok(()) })
+        })?;
+
+        instance.func_new_async("get-assets", |_store, _types, _params, _results| {
+            Box::new(async move { Ok(()) })
+        })?;
+
         Ok(self)
     }
 
@@ -99,6 +114,15 @@ impl WorkerLinker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::Asset;
+
+    fn make_worker_assets() -> WorkerAssets {
+        WorkerAssets::from(vec![Asset {
+            src_path: "/tmp/index.html".to_string(),
+            path: "/index.html".to_string(),
+            mime_type: Some("text/html".to_string()),
+        }])
+    }
 
     #[test]
     fn test_new() {
@@ -115,7 +139,20 @@ mod tests {
         assert!(
             WorkerLinker::new()
                 .unwrap()
-                .with_bundle("console.log('hello')".to_string())
+                .with_bundle("console.log('hello')".to_string(), None)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_with_bundle_and_assets() {
+        assert!(
+            WorkerLinker::new()
+                .unwrap()
+                .with_bundle(
+                    "console.log('hello')".to_string(),
+                    Some(make_worker_assets())
+                )
                 .is_ok()
         );
     }
@@ -147,7 +184,7 @@ mod tests {
     fn test_bundle_and_stub_are_mutually_exclusive() {
         let result = WorkerLinker::new()
             .unwrap()
-            .with_bundle("console.log('hello')".to_string())
+            .with_bundle("console.log('hello')".to_string(), None)
             .unwrap()
             .with_bundle_stub();
         assert!(result.is_err());
