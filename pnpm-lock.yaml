@@ -291,6 +291,8 @@ importers:
         specifier: ^4.1.7
         version: 4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0))
 
+  packages/worker: {}
+
   tests:
     devDependencies:
       vitest:

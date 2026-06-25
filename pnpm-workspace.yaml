@@ -1,7 +1,8 @@
 packages:
-  - packages/types
-  - packages/docs
   - packages/builder
+  - packages/types
+  - packages/worker
+  - packages/docs
   - examples/env
   - examples/fetch
   - examples/file-system
