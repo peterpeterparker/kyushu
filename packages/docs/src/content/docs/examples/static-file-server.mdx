@@ -1,13 +1,31 @@
 ---
 title: Static File Server
-description: Serve static files from a directory.
+description: Serve static files from a Kyushu worker.
 ---
 
-Serve static files from a mounted directory, useful for hosting a website or a single-page app.
+To serve static files you can either use the built-in static assets feature, which bundles files directly into the worker, or mount a directory into the sandbox and read files at runtime. The former being the recommended approach for simplicity reasons.
+
+## Using static assets (recommended)
 
 :::tip
-This site - [kyushu.dev](https://kyushu.dev) - is served by Kyushu using a more complete implementation. See the [source on GitHub](https://github.com/peterpeterparker/kyushu/blob/main/packages/docs/src/server.ts) for brotli compression, HEAD support, path aliases, and more.
+This site - [kyushu.dev](https://kyushu.dev) - is served by Kyushu using this feature.
 :::
+
+Bundle files directly into the worker binary at build time and serve them via `env.ASSETS`. See the [guide](/guides/static-assets) for the full setup.
+
+```typescript title="src/index.ts"
+import type { ExportedHandler } from "kyushu-types";
+
+export default {
+  async fetch(request, env) {
+    return env.ASSETS.fetch(request);
+  },
+} satisfies ExportedHandler;
+```
+
+## Using a mounted directory
+
+Serve files from a directory mounted into the sandbox at runtime. Useful when you want to serve files that change without rebuilding the worker.
 
 ```typescript title="src/index.ts"
 import type { ExportedHandler } from "kyushu-types";
@@ -51,8 +69,6 @@ export default {
   },
 } satisfies ExportedHandler;
 ```
-
-## Config
 
 Mount a directory containing your static files into the sandbox.
 

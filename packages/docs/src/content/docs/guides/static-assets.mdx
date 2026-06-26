@@ -1,0 +1,102 @@
+---
+title: Static Assets
+description: How to serve static files from a Kyushu worker.
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+Kyushu supports bundling static files (HTML, CSS, JS, images) directly into your worker. At build time, `kyu build` embeds each asset into the worker binary and requests are served directly from memory at runtime.
+
+## Setup
+
+<Steps>
+
+1. **Add an `[assets]` section to your config**
+
+   ```toml title="kyushu.toml"
+   [assets]
+   dir = "dist"
+   ```
+
+   The `dir` field points to the directory containing your static files, relative to the config file.
+
+2. **Serve assets in your worker**
+
+   Use `env.ASSETS.fetch` to handle incoming requests:
+
+   ```typescript
+   import type { ExportedHandler } from "kyushu-types";
+
+   export default {
+     async fetch(request, env) {
+       return env.ASSETS.fetch(request);
+     },
+   } satisfies ExportedHandler;
+   ```
+
+3. **Build and run**
+
+   ```bash
+   kyu build kyushu.toml
+   kyu run
+   ```
+
+</Steps>
+
+## Precompression
+
+You can instruct `kyu build` to generate pre-compressed variants alongside each asset:
+
+```toml
+[assets]
+dir = "dist"
+precompress = ["brotli", "gzip"]
+```
+
+When a browser sends `Accept-Encoding: br` or `Accept-Encoding: gzip`, Kyushu automatically serves the compressed variant with the appropriate `Content-Encoding` header - no runtime compression overhead.
+
+## Customizing responses
+
+`env.ASSETS.fetch` returns a `WorkerResponse` you can spread and override:
+
+```typescript
+export default {
+  async fetch(request, env) {
+    const response = await env.ASSETS.fetch(request);
+
+    return {
+      ...response,
+      headers: {
+        ...response.headers,
+        "x-custom-header": "value",
+      },
+    };
+  },
+} satisfies ExportedHandler;
+```
+
+## URL resolution
+
+Kyushu resolves asset paths with the following rules:
+
+- `/` resolves to `/index.html`
+- `/about` resolves to `/about.html`, then `/about/index.html`
+- Exact paths are matched first
+
+## Headers
+
+The following headers are set automatically on every asset response:
+
+| Header                      | Value                                        |
+| --------------------------- | -------------------------------------------- |
+| `etag`                      | MD5 hash of the asset bytes                  |
+| `vary`                      | `Accept-Encoding`                            |
+| `last-modified`             | File modification time at build              |
+| `cache-control`             | Set for `.css`, `.js`, `.svg`, `.woff2`      |
+| `content-type`              | Inferred from file extension                 |
+| `content-length`            | Size of the served bytes                     |
+| `content-encoding`          | `br` or `gzip` when serving compressed asset |
+| `X-Content-Type-Options`    | `nosniff`                                    |
+| `Strict-Transport-Security` | `max-age=31536000 ; includeSubDomains`       |
+| `Referrer-Policy`           | `no-referrer`                                |
+| `X-Frame-Options`           | `DENY`                                       |

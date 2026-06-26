@@ -60,7 +60,7 @@ Or download a pre-built binary from the [releases page](https://github.com/peter
 import type { ExportedHandler } from "kyushu-types";
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     return {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -99,7 +99,7 @@ Workers export a default object with a `fetch` handler:
 
 ```typescript
 export default {
-  async fetch(request: WorkerRequest): Promise<WorkerResponse> {
+  async fetch(request: WorkerRequest, env: Env): Promise<WorkerResponse> {
     // ...
   },
 };
@@ -121,6 +121,32 @@ export default {
 | `status`  | `number` \| `undefined`                                  | HTTP status code (default: `200`) |
 | `body`    | `string` \| `ArrayBuffer` \| `Uint8Array` \| `undefined` | Response body                     |
 | `headers` | `Record<string, string>` \| `undefined`                  | Response headers                  |
+
+### `Env`
+
+| Field    | Type                       | Description                                           |
+| -------- | -------------------------- | ----------------------------------------------------- |
+| `ASSETS` | `EnvAssets` \| `undefined` | Available when `[assets]` is configured in `kyu.toml` |
+
+#### `EnvAssets`
+
+| Method  | Signature                                             | Description          |
+| ------- | ----------------------------------------------------- | -------------------- |
+| `fetch` | `(request: WorkerRequest) => Promise<WorkerResponse>` | Serve a static asset |
+
+## Static assets
+
+Kyushu supports bundling static files (HTML, CSS, JS, images) directly into your worker. At build time, `kyu build` embeds each asset into the worker binary and requests are served directly from memory at runtime.
+
+Add an `[assets]` section to your config (see [Config reference](#config-reference)) and serve them via `env.ASSETS`:
+
+```typescript
+export default {
+  async fetch(request, env) {
+    return env.ASSETS.fetch(request);
+  },
+} satisfies ExportedHandler;
+```
 
 ## CLI reference
 
@@ -155,6 +181,21 @@ file = "__kyushu_worker.wasm"  # default
 | `input.src`   | string | `src/index.ts`         | Path to your TypeScript or JavaScript entry point |
 | `output.dir`  | string | `worker`               | Output directory for the built worker             |
 | `output.file` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
+
+### Assets
+
+Configure static asset bundling.
+
+```toml
+[assets]
+dir = "dist"
+precompress = ["brotli", "gzip"]  # optional
+```
+
+| Field                | Type   | Default | Description                                               |
+| -------------------- | ------ | ------- | --------------------------------------------------------- |
+| `assets.dir`         | string | —       | Directory of static assets to bundle into the worker      |
+| `assets.precompress` | array  | —       | Compression formats to pre-generate: `"brotli"`, `"gzip"` |
 
 ### Run
 
@@ -233,7 +274,7 @@ function importAtRuntime(specifier) {
 }
 ```
 
-Bundlers intentionally leave these calls untouched, and Kyushu's Wasm sandbox has no Node.js module resolution at runtime — so they'll throw a `ReferenceError` when executed.
+Bundlers intentionally leave these calls untouched, and Kyushu's Wasm sandbox has no Node.js module resolution at runtime - so they'll throw a `ReferenceError` when executed.
 
 **Example:** `file-type`'s `fromFile` dynamically imports `strtok3` at runtime. Use `fromBuffer` instead:
 
