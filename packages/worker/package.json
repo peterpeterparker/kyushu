@@ -1,18 +1,8 @@
 {
   "name": "kyushu-worker",
-  "version": "0.0.3",
   "private": true,
   "description": "Runtime for executing JavaScript fetch handlers inside Kuyshu's worker",
-  "bugs": {
-    "url": "https://github.com/peterpeterparker/kyushu"
-  },
   "license": "MIT",
-  "author": "David Dal Busco (https://daviddalbusco.com)",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/peterpeterparker/kyushu.git",
-    "directory": "packages/worker"
-  },
   "files": [
     "dist",
     "README.md",
