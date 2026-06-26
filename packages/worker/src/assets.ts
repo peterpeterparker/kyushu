@@ -60,15 +60,30 @@ const resolveAsset = ({ pathname }: Pick<URL, "pathname">): Asset | undefined =>
   return undefined;
 };
 
+type CompressionEncoding = "br" | "gz";
+type CompressedAsset = { asset: Asset; encoding: CompressionEncoding };
+
 const resolveCompressedAsset = ({
   pathname,
   headers,
-}: Pick<URL, "pathname"> & { headers: WorkerRequest["headers"] }): Asset | undefined => {
-  if (headers?.["accept-encoding"]?.includes("br") !== true) {
-    return undefined;
+}: Pick<URL, "pathname"> & { headers: WorkerRequest["headers"] }): CompressedAsset | undefined => {
+  const acceptEncoding = headers?.["accept-encoding"];
+
+  const resolveAsset = (encoding: CompressionEncoding): CompressedAsset | undefined => {
+    const asset = __kyushu_get_asset__(`${pathname}.${encoding}`);
+
+    return asset !== undefined ? { asset, encoding } : undefined;
+  };
+
+  if (acceptEncoding?.includes("br") === true) {
+    return resolveAsset("br");
   }
 
-  return __kyushu_get_asset__(`${pathname}.br`);
+  if (acceptEncoding?.includes("gzip") === true) {
+    return resolveAsset("gz");
+  }
+
+  return undefined;
 };
 
 type Etag = string;
@@ -81,11 +96,11 @@ const buildResponse = ({
   ifNoneMatch,
 }: {
   asset: Asset;
-  compressedAsset: Asset | undefined;
+  compressedAsset: CompressedAsset | undefined;
   method: Extract<WorkerMethod, "GET" | "HEAD">;
   ifNoneMatch: Etag | undefined;
 } & Pick<URL, "pathname">): WorkerResponse => {
-  const { bytes } = compressedAsset ?? asset;
+  const { bytes } = compressedAsset?.asset ?? asset;
   const { mimeType, lastModified } = asset;
 
   const etag = `"${createHash("md5").update(bytes).digest("hex")}"`;
@@ -114,7 +129,7 @@ const buildResponse = ({
         mimeType !== undefined && mimeType !== "" ? mimeType : "application/octet-stream",
       "content-length": `${bytes.length}`,
       ...(compressedAsset !== undefined && {
-        "content-encoding": "br",
+        "content-encoding": compressedAsset.encoding,
       }),
     },
     ...(method === "GET" && { body: bytes }),

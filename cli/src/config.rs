@@ -40,12 +40,20 @@ pub struct OutputConfig {
 #[derive(Deserialize, Default, Clone)]
 pub struct AssetsConfig {
     pub dir: String,
+    pub precompress: Option<Vec<Compression>>,
 }
 
 #[derive(Deserialize, Default, Clone)]
 pub struct WorkerConfig {
     pub mounts: Option<Vec<MountConfig>>,
     pub env: Option<Vec<EnvConfig>>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum Compression {
+    Brotli,
+    Gzip,
 }
 
 #[derive(Deserialize, Clone)]
@@ -107,5 +115,9 @@ impl OutputConfig {
 impl AssetsConfig {
     pub fn dir(&self) -> &str {
         &self.dir
+    }
+
+    pub fn precompress(&self) -> &[Compression] {
+        self.precompress.as_deref().unwrap_or(&[])
     }
 }
