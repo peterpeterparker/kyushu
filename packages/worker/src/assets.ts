@@ -90,7 +90,7 @@ const buildResponse = ({
   ifNoneMatch: Etag | undefined;
 } & Pick<URL, "pathname">): WorkerResponse => {
   const { bytes } = compressedAsset ?? asset;
-  const { mimeType } = asset;
+  const { mimeType, lastModified } = asset;
 
   const etag = `"${createHash("md5").update(bytes).digest("hex")}"`;
 
@@ -98,10 +98,11 @@ const buildResponse = ({
 
   const headers: WorkerResponse["headers"] = {
     ...SECURITY_HEADERS,
-    // TODO
-    //  "last-modified": lastModified.toUTCString(),
     etag,
     vary: "Accept-Encoding",
+    ...(lastModified !== undefined && {
+      "last-modified": new Date(lastModified * 1000).toUTCString(),
+    }),
     ...(cache !== undefined && { "cache-control": cache.join(", ") }),
   };
 

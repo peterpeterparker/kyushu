@@ -4,31 +4,26 @@
 #[doc(hidden)]
 #[allow(non_snake_case)]
 pub unsafe fn _export_wizer_initialize_cabi<T: Guest>() {
-    #[cfg(target_arch = "wasm32")]
-    _rt::run_ctors_once();
+    #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
     T::wizer_initialize();
 }
 #[doc(hidden)]
 #[allow(non_snake_case)]
 pub unsafe fn _export_kyu_initialize_cabi<T: Guest>() {
-    #[cfg(target_arch = "wasm32")]
-    _rt::run_ctors_once();
+    #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
     T::kyu_initialize();
 }
 #[doc(hidden)]
 #[allow(non_snake_case)]
 pub unsafe fn _export_kyu_version_cabi<T: Guest>() -> *mut u8 {
-    #[cfg(target_arch = "wasm32")]
-    _rt::run_ctors_once();
+    #[cfg(target_arch = "wasm32")] _rt::run_ctors_once();
     let result0 = T::kyu_version();
     let ptr1 = (&raw mut _RET_AREA.0).cast::<u8>();
     let vec2 = (result0.into_bytes()).into_boxed_slice();
     let ptr2 = vec2.as_ptr().cast::<u8>();
     let len2 = vec2.len();
     ::core::mem::forget(vec2);
-    *ptr1
-        .add(::core::mem::size_of::<*const u8>())
-        .cast::<usize>() = len2;
+    *ptr1.add(::core::mem::size_of::<*const u8>()).cast::<usize>() = len2;
     *ptr1.add(0).cast::<*mut u8>() = ptr2.cast_mut();
     ptr1
 }
@@ -36,9 +31,7 @@ pub unsafe fn _export_kyu_version_cabi<T: Guest>() -> *mut u8 {
 #[allow(non_snake_case)]
 pub unsafe fn __post_return_kyu_version<T: Guest>(arg0: *mut u8) {
     let l0 = *arg0.add(0).cast::<*mut u8>();
-    let l1 = *arg0
-        .add(::core::mem::size_of::<*const u8>())
-        .cast::<usize>();
+    let l1 = *arg0.add(::core::mem::size_of::<*const u8>()).cast::<usize>();
     _rt::cabi_dealloc(l0, l1, 1);
 }
 pub trait Guest {
@@ -69,8 +62,9 @@ pub(crate) use __export_world_worker_cabi;
 #[cfg_attr(target_pointer_width = "64", repr(align(8)))]
 #[cfg_attr(target_pointer_width = "32", repr(align(4)))]
 struct _RetArea([::core::mem::MaybeUninit<u8>; 2 * ::core::mem::size_of::<*const u8>()]);
-static mut _RET_AREA: _RetArea =
-    _RetArea([::core::mem::MaybeUninit::uninit(); 2 * ::core::mem::size_of::<*const u8>()]);
+static mut _RET_AREA: _RetArea = _RetArea(
+    [::core::mem::MaybeUninit::uninit(); 2 * ::core::mem::size_of::<*const u8>()],
+);
 #[rustfmt::skip]
 #[allow(dead_code, clippy::all)]
 pub mod kyushu {
@@ -293,6 +287,44 @@ pub mod kyushu {
                         let len4 = l3;
                         let result5 = _rt::Vec::from_raw_parts(l2.cast(), len4, len4);
                         result5
+                    }
+                }
+            }
+            impl Asset {
+                #[allow(unused_unsafe, clippy::all)]
+                /// The last modified timestamp of the asset in seconds since Unix epoch.
+                pub fn last_modified(&self) -> Option<u64> {
+                    unsafe {
+                        #[repr(align(8))]
+                        struct RetArea([::core::mem::MaybeUninit<u8>; 16]);
+                        let mut ret_area = RetArea(
+                            [::core::mem::MaybeUninit::uninit(); 16],
+                        );
+                        let ptr0 = ret_area.0.as_mut_ptr().cast::<u8>();
+                        #[cfg(target_arch = "wasm32")]
+                        #[link(wasm_import_module = "kyushu:worker/bundle")]
+                        unsafe extern "C" {
+                            #[link_name = "[method]asset.last-modified"]
+                            fn wit_import1(_: i32, _: *mut u8);
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        unsafe extern "C" fn wit_import1(_: i32, _: *mut u8) {
+                            unreachable!()
+                        }
+                        unsafe { wit_import1((self).handle() as i32, ptr0) };
+                        let l2 = i32::from(*ptr0.add(0).cast::<u8>());
+                        let result4 = match l2 {
+                            0 => None,
+                            1 => {
+                                let e = {
+                                    let l3 = *ptr0.add(8).cast::<i64>();
+                                    l3 as u64
+                                };
+                                Some(e)
+                            }
+                            _ => _rt::invalid_enum_discriminant(),
+                        };
+                        result4
                     }
                 }
             }
@@ -9016,17 +9048,20 @@ macro_rules! __export_worker_impl {
 #[doc(inline)]
 pub(crate) use __export_worker_impl as export;
 #[cfg(target_arch = "wasm32")]
-#[unsafe(link_section = "component-type:wit-bindgen:0.41.0:kyushu:worker:worker:encoded world")]
+#[unsafe(
+    link_section = "component-type:wit-bindgen:0.41.0:kyushu:worker:worker:encoded world"
+)]
 #[doc(hidden)]
 #[allow(clippy::octal_escapes)]
-pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7322] = *b"\
-\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\x9d8\x01A\x02\x01A*\x01\
-B\x11\x04\0\x05asset\x03\x01\x01h\0\x01@\x01\x04self\x01\0s\x04\0\x12[method]ass\
+pub static __WIT_BINDGEN_COMPONENT_TYPE: [u8; 7368] = *b"\
+\0asm\x0d\0\x01\0\0\x19\x16wit-component-encoding\x04\0\x07\xcb8\x01A\x02\x01A*\x01\
+B\x14\x04\0\x05asset\x03\x01\x01h\0\x01@\x01\x04self\x01\0s\x04\0\x12[method]ass\
 et.path\x01\x02\x01ks\x01@\x01\x04self\x01\0\x03\x04\0\x17[method]asset.mime-typ\
 e\x01\x04\x01p}\x01@\x01\x04self\x01\0\x05\x04\0\x13[method]asset.bytes\x01\x06\x01\
-@\0\0s\x04\0\x0aget-bundle\x01\x07\x01i\0\x01p\x08\x01k\x09\x01@\0\0\x0a\x04\0\x0a\
-get-assets\x01\x0b\x03\0\x14kyushu:worker/bundle\x05\0\x01B\x0a\x04\0\x08pollabl\
-e\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\x02\
+kw\x01@\x01\x04self\x01\0\x07\x04\0\x1b[method]asset.last-modified\x01\x08\x01@\0\
+\0s\x04\0\x0aget-bundle\x01\x09\x01i\0\x01p\x0a\x01k\x0b\x01@\0\0\x0c\x04\0\x0ag\
+et-assets\x01\x0d\x03\0\x14kyushu:worker/bundle\x05\0\x01B\x0a\x04\0\x08pollable\
+\x03\x01\x01h\0\x01@\x01\x04self\x01\0\x7f\x04\0\x16[method]pollable.ready\x01\x02\
 \x01@\x01\x04self\x01\x01\0\x04\0\x16[method]pollable.block\x01\x03\x01p\x01\x01\
 py\x01@\x01\x02in\x04\0\x05\x04\0\x04poll\x01\x06\x03\0\x13wasi:io/poll@0.2.11\x05\
 \x01\x02\x03\0\x01\x08pollable\x01B\x0f\x02\x03\x02\x01\x02\x04\0\x08pollable\x03\

@@ -131,6 +131,10 @@ impl WorkerLinker {
             results[0] = Val::List(bytes.iter().map(|b| Val::U8(*b)).collect());
         });
 
+        asset_method!(instance, "[method]asset.last-modified", |asset, results| {
+            results[0] = Val::Option(asset.last_modified().map(|m| Box::new(Val::U64(m))));
+        });
+
         Ok(())
     }
 
