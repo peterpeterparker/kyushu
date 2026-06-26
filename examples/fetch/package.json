@@ -4,6 +4,6 @@
   "type": "module",
   "main": "index.js",
   "devDependencies": {
-    "kyushu-types": "^0.0.3"
+    "kyushu-types": "^0.1.0"
   }
 }

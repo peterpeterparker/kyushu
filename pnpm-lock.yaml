@@ -223,26 +223,26 @@ importers:
   examples/env:
     devDependencies:
       kyushu-types:
-        specifier: ^0.0.3
-        version: 0.0.3
+        specifier: ^0.1.0
+        version: 0.1.0
 
   examples/fetch:
     devDependencies:
       kyushu-types:
-        specifier: ^0.0.3
-        version: 0.0.3
+        specifier: ^0.1.0
+        version: 0.1.0
 
   examples/file-system:
     devDependencies:
       kyushu-types:
-        specifier: ^0.0.3
-        version: 0.0.3
+        specifier: ^0.1.0
+        version: 0.1.0
 
   examples/hello-world:
     devDependencies:
       kyushu-types:
-        specifier: ^0.0.3
-        version: 0.0.3
+        specifier: ^0.1.0
+        version: 0.1.0
 
   packages/builder:
     devDependencies:
@@ -254,13 +254,13 @@ importers:
     dependencies:
       '@astrojs/starlight':
         specifier: ^0.39.2
-        version: 0.39.2(astro@6.4.2(@types/node@25.9.1)(rollup@4.60.4))
+        version: 0.39.2(astro@6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4))(typescript@6.0.3)
       '@fontsource-variable/nunito-sans':
         specifier: ^5.2.7
         version: 5.2.7
       astro:
         specifier: ^6.4.2
-        version: 6.4.2(@types/node@25.9.1)(rollup@4.60.4)
+        version: 6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4)
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
@@ -1974,8 +1974,8 @@ packages:
     resolution: {integrity: sha512-dhG34DXATL5hSxJbIexCft8FChFXtmskoZYnoPWjXQuebWYCNkVeV3KkGegCK9CP1oswI/vQibS2GY7Em/sJJA==}
     engines: {node: '>= 8'}
 
-  kyushu-types@0.0.3:
-    resolution: {integrity: sha512-wrUZ4nM8kgx7hfNOM0rrAMKfBmO3AgJ8sqvpaEHz2C7ZIPHfR4pAB19cVlT2DHeNs0USqymIuQtoB4uelTmb7A==}
+  kyushu-types@0.1.0:
+    resolution: {integrity: sha512-/WlDcEtBJotLhOtT5oP+kz4BJIx6eohNQkrH5aYoivkVDqppyLr9KUjT81kF+Zc6IFhRZaI0ucZ11P50RYOT3Q==}
 
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
@@ -2935,12 +2935,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@astrojs/mdx@5.0.6(astro@6.4.2(@types/node@25.9.1)(rollup@4.60.4))':
+  '@astrojs/mdx@5.0.6(astro@6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4))':
     dependencies:
       '@astrojs/markdown-remark': 7.1.2
       '@mdx-js/mdx': 3.1.1
       acorn: 8.16.0
-      astro: 6.4.2(@types/node@25.9.1)(rollup@4.60.4)
+      astro: 6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4)
       es-module-lexer: 2.1.0
       estree-util-visit: 2.0.0
       hast-util-to-html: 9.0.5
@@ -2964,23 +2964,23 @@ snapshots:
       stream-replace-string: 2.0.0
       zod: 4.4.3
 
-  '@astrojs/starlight@0.39.2(astro@6.4.2(@types/node@25.9.1)(rollup@4.60.4))':
+  '@astrojs/starlight@0.39.2(astro@6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4))(typescript@6.0.3)':
     dependencies:
       '@astrojs/markdown-remark': 7.2.0
-      '@astrojs/mdx': 5.0.6(astro@6.4.2(@types/node@25.9.1)(rollup@4.60.4))
+      '@astrojs/mdx': 5.0.6(astro@6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4))
       '@astrojs/sitemap': 3.7.3
       '@pagefind/default-ui': 1.5.2
       '@types/hast': 3.0.4
       '@types/js-yaml': 4.0.9
       '@types/mdast': 4.0.4
-      astro: 6.4.2(@types/node@25.9.1)(rollup@4.60.4)
-      astro-expressive-code: 0.42.0(astro@6.4.2(@types/node@25.9.1)(rollup@4.60.4))
+      astro: 6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4)
+      astro-expressive-code: 0.42.0(astro@6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4))
       bcp-47: 2.1.0
       hast-util-from-html: 2.0.3
       hast-util-select: 6.0.4
       hast-util-to-string: 3.0.1
       hastscript: 9.0.1
-      i18next: 26.3.0
+      i18next: 26.3.0(typescript@6.0.3)
       js-yaml: 4.1.1
       klona: 2.0.6
       magic-string: 0.30.21
@@ -3813,12 +3813,12 @@ snapshots:
 
   astring@1.9.0: {}
 
-  astro-expressive-code@0.42.0(astro@6.4.2(@types/node@25.9.1)(rollup@4.60.4)):
+  astro-expressive-code@0.42.0(astro@6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4)):
     dependencies:
-      astro: 6.4.2(@types/node@25.9.1)(rollup@4.60.4)
+      astro: 6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4)
       rehype-expressive-code: 0.42.0
 
-  astro@6.4.2(@types/node@25.9.1)(rollup@4.60.4):
+  astro@6.4.2(@types/node@25.9.1)(lightningcss@1.32.0)(rollup@4.60.4):
     dependencies:
       '@astrojs/compiler': 4.0.0
       '@astrojs/internal-helpers': 0.10.0
@@ -3870,8 +3870,8 @@ snapshots:
       unist-util-visit: 5.1.0
       unstorage: 1.17.5
       vfile: 6.0.3
-      vite: 7.3.3(@types/node@25.9.1)
-      vitefu: 1.1.3(vite@7.3.3(@types/node@25.9.1))
+      vite: 7.3.3(@types/node@25.9.1)(lightningcss@1.32.0)
+      vitefu: 1.1.3(vite@7.3.3(@types/node@25.9.1)(lightningcss@1.32.0))
       xxhash-wasm: 1.1.0
       yargs-parser: 22.0.0
       zod: 4.4.3
@@ -4407,7 +4407,9 @@ snapshots:
 
   http-cache-semantics@4.2.0: {}
 
-  i18next@26.3.0: {}
+  i18next@26.3.0(typescript@6.0.3):
+    optionalDependencies:
+      typescript: 6.0.3
 
   inline-style-parser@0.2.7: {}
 
@@ -4446,7 +4448,7 @@ snapshots:
 
   klona@2.0.6: {}
 
-  kyushu-types@0.0.3:
+  kyushu-types@0.1.0:
     dependencies:
       zod: 4.4.3
 
@@ -5581,7 +5583,7 @@ snapshots:
       '@types/unist': 3.0.3
       vfile-message: 4.0.3
 
-  vite@7.3.3(@types/node@25.9.1):
+  vite@7.3.3(@types/node@25.9.1)(lightningcss@1.32.0):
     dependencies:
       esbuild: 0.27.7
       fdir: 6.5.0(picomatch@4.0.4)
@@ -5592,6 +5594,7 @@ snapshots:
     optionalDependencies:
       '@types/node': 25.9.1
       fsevents: 2.3.3
+      lightningcss: 1.32.0
 
   vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0):
     dependencies:
@@ -5605,9 +5608,9 @@ snapshots:
       esbuild: 0.28.0
       fsevents: 2.3.3
 
-  vitefu@1.1.3(vite@7.3.3(@types/node@25.9.1)):
+  vitefu@1.1.3(vite@7.3.3(@types/node@25.9.1)(lightningcss@1.32.0)):
     optionalDependencies:
-      vite: 7.3.3(@types/node@25.9.1)
+      vite: 7.3.3(@types/node@25.9.1)(lightningcss@1.32.0)
 
   vitest@4.1.7(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)):
     dependencies:
