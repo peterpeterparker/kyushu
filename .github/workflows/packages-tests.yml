@@ -27,6 +27,8 @@ jobs:
           persist-credentials: false
       - name: Prepare
         uses: ./.github/actions/prepare
+      - name: Build Types dependencies
+        run: pnpm --filter kyushu-types build
       - name: Tests
         run: pnpm --filter kyushu-worker test
 
