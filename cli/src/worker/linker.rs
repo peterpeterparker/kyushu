@@ -180,6 +180,11 @@ impl WorkerLinker {
             |_store, _types, _params, _results| Box::new(async move { Ok(()) }),
         )?;
 
+        instance.func_new_async(
+            "[method]asset.last-modified",
+            |_store, _types, _params, _results| Box::new(async move { Ok(()) }),
+        )?;
+
         Ok(())
     }
 
