@@ -1,6 +1,7 @@
 {
   "name": "kyushu-worker",
   "version": "0.0.3",
+  "private": true,
   "description": "Runtime for executing JavaScript fetch handlers inside Kuyshu's worker",
   "bugs": {
     "url": "https://github.com/peterpeterparker/kyushu"
