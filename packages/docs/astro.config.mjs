@@ -76,7 +76,7 @@ export default defineConfig({
         },
         {
           label: "Guides",
-          items: [{ slug: "guides/deploy" }],
+          items: [{ slug: "guides/static-assets" }, { slug: "guides/deploy" }],
         },
         { slug: "known-limitations" },
         { slug: "security" },

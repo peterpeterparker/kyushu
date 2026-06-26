@@ -29,6 +29,21 @@ src = "src/server.ts"
 dir = "dist"
 ```
 
+## Assets
+
+Controls static asset bundling during `kyu build`. See the [Static Assets guide](/guides/static-assets) for setup instructions.
+
+| Field                | Type   | Default | Description                                               |
+| -------------------- | ------ | ------- | --------------------------------------------------------- |
+| `assets.dir`         | string | —       | Directory of static assets to bundle into the worker      |
+| `assets.precompress` | array  | —       | Compression formats to pre-generate: `"brotli"`, `"gzip"` |
+
+```toml
+[assets]
+dir = "dist"
+precompress = ["brotli", "gzip"]
+```
+
 ## Run
 
 Controls how `kyu run` loads and serves your worker.
