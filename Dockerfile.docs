@@ -33,12 +33,10 @@ RUN pnpm install --frozen-lockfile
 
 RUN pnpm --filter kyushu-docs build
 
-RUN cd packages/docs && kyu build kyushu.build.toml
+RUN cd packages/docs && kyu build kyushu.toml
 
 RUN mkdir -p /out/worker && \
     cp packages/docs/worker/__kyushu_worker.wasm /out/worker/ && \
-    cp packages/docs/kyushu.run.toml /out/ && \
-    cp -r packages/docs/dist /out/dist && \
     tar -czf /docs.tar.gz -C /out .
 
 FROM scratch AS export
