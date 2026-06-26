@@ -35,6 +35,6 @@ jobs:
       - name: Create Pull Request
         uses: ./.github/actions/create-pr
         with:
-          title: "chore: update worker wasm ${{ github.ref_name }}"
+          title: "chore(cli): update worker wasm ${{ github.ref_name }}"
           body: "Updates the embedded worker wasm to ${{ github.ref_name }}"
           branch: "chore/worker-wasm-${{ github.ref_name }}"
