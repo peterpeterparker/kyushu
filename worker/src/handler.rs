@@ -113,11 +113,18 @@ fn extract_request(request: IncomingRequest) -> JsRequest {
 async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
     let js_state = kyushu_runtime::internal::get_js_state();
 
-    let result = js_state.ctx.async_with(async |ctx| {
-        let js_req = request.into_js(&ctx).map_err(|e| e.to_string())?;
-        ctx.globals().set("jsRequest", js_req).map_err(|e| e.to_string())?;
+    let result = js_state
+        .ctx
+        .async_with(async |ctx| {
+            let js_req = request.into_js(&ctx).map_err(|e| e.to_string())?;
+            ctx.globals()
+                .set("jsRequest", js_req)
+                .map_err(|e| e.to_string())?;
 
-        let promise = Module::evaluate(ctx.clone(), "@kyushu/handler", r#"
+            let promise = Module::evaluate(
+                ctx.clone(),
+                "@kyushu/handler",
+                r#"
             import app from "@kyushu/app";
             import { handleRequest } from "@kyushu/worker";
 
@@ -128,15 +135,21 @@ async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
                 body: resp.body ?? null,
                 headers: resp.headers ?? {}
             };
-        "#)
+        "#,
+            )
             .catch(&ctx)
             .map_err(|e| e.to_string())?;
 
-        promise.into_future::<()>().await.catch(&ctx).map_err(|e| e.to_string())?;
+            promise
+                .into_future::<()>()
+                .await
+                .catch(&ctx)
+                .map_err(|e| e.to_string())?;
 
-        let resp: JsResponse = ctx.globals().get("jsResult").map_err(|e| e.to_string())?;
-        Ok::<JsResponse, String>(resp)
-    }).await?;
+            let resp: JsResponse = ctx.globals().get("jsResult").map_err(|e| e.to_string())?;
+            Ok::<JsResponse, String>(resp)
+        })
+        .await?;
 
     js_state.rt.idle().await;
     Ok(result)
