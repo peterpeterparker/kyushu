@@ -99,14 +99,16 @@ mod tests {
     }
 
     #[test]
-    fn test_precompress_skips_already_compressed() {
+    fn test_precompress_overwrites_existing() {
         let dir = setup_dir();
         fs::write(dir.path().join("index.html.br"), b"already compressed").unwrap();
         precompress_assets(dir.path().to_str().unwrap(), &[Compression::Brotli]).unwrap();
-        assert_eq!(
-            fs::read(dir.path().join("index.html.br")).unwrap(),
-            b"already compressed"
-        );
+        // .br file should be overwritten with freshly compressed content
+        let result = fs::read(dir.path().join("index.html.br")).unwrap();
+        assert_ne!(result, b"already compressed");
+        // should equal freshly compressed content
+        let expected = compress_brotli(&b"<html></html>".to_vec()).unwrap();
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -135,6 +137,7 @@ mod tests {
 
     #[test]
     fn test_precompress_nonexistent_dir() {
-        assert!(precompress_assets("/nonexistent/path", &[Compression::Brotli]).is_err());
+        // WalkDir resolves empty. Non exists dir is checked in load_assets
+        assert!(precompress_assets("/nonexistent/path", &[Compression::Brotli]).is_ok());
     }
 }
