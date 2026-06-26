@@ -3,3 +3,4 @@ src = "src/server.ts"
 
 [assets]
 dir = "dist"
+precompress = ["brotli"]
