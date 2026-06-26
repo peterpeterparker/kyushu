@@ -1,6 +1,6 @@
 import { fetch } from "../src/assets";
 
-const mockAssets: Record<string, { bytes: Uint8Array; mimeType?: string }> = {};
+const mockAssets: Record<string, Asset> = {};
 
 vi.stubGlobal("__kyushu_get_asset__", (path: string) => mockAssets[path]);
 
@@ -116,5 +116,21 @@ describe("fetch", () => {
     setAsset("/file.bin", "data");
     const res = await fetch({ method: "GET", url: "http://localhost/file.bin" });
     expect(res.headers?.["content-type"]).toBe("application/octet-stream");
+  });
+
+  it("returns last-modified header when available", async () => {
+    mockAssets["/index.html"] = {
+      bytes: new TextEncoder().encode("<html></html>"),
+      mimeType: "text/html",
+      lastModified: 1700000000,
+    };
+    const res = await fetch({ method: "GET", url: "http://localhost/index.html" });
+    expect(res.headers?.["last-modified"]).toBe(new Date(1700000000 * 1000).toUTCString());
+  });
+
+  it("omits last-modified header when not available", async () => {
+    setAsset("/index.html", "<html></html>", "text/html");
+    const res = await fetch({ method: "GET", url: "http://localhost/index.html" });
+    expect(res.headers?.["last-modified"]).toBeUndefined();
   });
 });

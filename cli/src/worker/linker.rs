@@ -131,6 +131,10 @@ impl WorkerLinker {
             results[0] = Val::List(bytes.iter().map(|b| Val::U8(*b)).collect());
         });
 
+        asset_method!(instance, "[method]asset.last-modified", |asset, results| {
+            results[0] = Val::Option(asset.last_modified().map(|m| Box::new(Val::U64(m))));
+        });
+
         Ok(())
     }
 
@@ -173,6 +177,11 @@ impl WorkerLinker {
 
         instance.func_new_async(
             "[method]asset.bytes",
+            |_store, _types, _params, _results| Box::new(async move { Ok(()) }),
+        )?;
+
+        instance.func_new_async(
+            "[method]asset.last-modified",
             |_store, _types, _params, _results| Box::new(async move { Ok(()) }),
         )?;
 

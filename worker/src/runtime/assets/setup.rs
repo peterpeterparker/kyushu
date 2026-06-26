@@ -10,6 +10,7 @@ pub fn load_assets() {
             path: asset.path(),
             bytes: asset.bytes(),
             mime_type: asset.mime_type(),
+            last_modified: asset.last_modified(),
         })
         .collect();
 

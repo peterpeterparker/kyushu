@@ -5,6 +5,7 @@ declare global {
   interface Asset {
     bytes: Uint8Array;
     mimeType?: string;
+    lastModified?: number;
   }
 
   /**

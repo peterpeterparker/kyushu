@@ -7,6 +7,7 @@ use rquickjs::{
 pub struct JsAsset<'js> {
     pub bytes: TypedArray<'js, u8>,
     pub mime_type: Option<String>,
+    pub last_modified: Option<u64>,
 }
 
 impl<'js> IntoJs<'js> for JsAsset<'js> {
@@ -14,6 +15,7 @@ impl<'js> IntoJs<'js> for JsAsset<'js> {
         let obj = Object::new(ctx.clone())?;
         obj.set("bytes", self.bytes)?;
         obj.set("mimeType", self.mime_type)?;
+        obj.set("lastModified", self.last_modified)?;
         Ok(obj.into_value())
     }
 }
@@ -23,6 +25,7 @@ impl<'js> JsAsset<'js> {
         Ok(Self {
             bytes: TypedArray::new(ctx.clone(), asset.bytes.as_slice())?,
             mime_type: asset.mime_type.clone(),
+            last_modified: asset.last_modified,
         })
     }
 }

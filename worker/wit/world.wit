@@ -18,8 +18,10 @@ interface bundle {
     path: func() -> string;
     /// The mime type of the asset, if known.
     mime-type: func() -> option<string>;
-    // The data of the asset.
+    /// The data of the asset.
     bytes: func() -> list<u8>;
+    /// The last modified timestamp of the asset in seconds since Unix epoch.
+    last-modified: func() -> option<u64>;
   }
 
   get-assets: func() -> option<list<asset>>;
