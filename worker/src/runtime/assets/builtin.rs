@@ -1,5 +1,8 @@
 use crate::runtime::assets::state::{ASSETS, Asset};
-use rquickjs::{Ctx, Error as JsError, IntoJs, Object, Result as JsResult, TypedArray, Value};
+use rquickjs::{
+    Ctx, Error as JsError, IntoJs, Object, Result as JsResult, String as JsString, TypedArray,
+    Value,
+};
 
 pub struct JsAsset<'js> {
     pub bytes: TypedArray<'js, u8>,
@@ -33,7 +36,7 @@ pub fn init_get_asset(ctx: &Ctx) -> Result<(), JsError> {
 #[rquickjs::function]
 fn get_asset<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Option<JsAsset<'js>>> {
     let Some(assets) = ASSETS.get() else {
-        return Ok(None);
+        return Err(ctx.throw(JsString::from_str(ctx.clone(), "No assets configured")?.into()));
     };
 
     let Some(asset) = assets.iter().find(|a| a.path == path) else {
