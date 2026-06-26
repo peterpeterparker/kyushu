@@ -29,6 +29,7 @@ impl<'js> JsAsset<'js> {
 
 pub fn init_get_asset(ctx: &Ctx) -> Result<(), JsError> {
     ctx.globals().set("__kyushu_get_asset__", js_get_asset)?;
+    ctx.globals().set("__kyushu_has_assets__", js_has_assets)?;
 
     Ok(())
 }
@@ -44,4 +45,9 @@ fn get_asset<'js>(ctx: Ctx<'js>, path: String) -> JsResult<Option<JsAsset<'js>>>
     };
 
     Ok(Some(JsAsset::from_asset(&ctx, asset)?))
+}
+
+#[rquickjs::function]
+fn has_assets<'js>(_ctx: Ctx<'js>) -> JsResult<bool> {
+    Ok(ASSETS.get().is_some())
 }
