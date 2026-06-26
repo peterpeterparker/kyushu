@@ -1,2 +1,5 @@
 [input]
 src = "src/server.ts"
+
+[assets]
+dir = "dist"
