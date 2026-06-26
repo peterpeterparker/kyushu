@@ -13,10 +13,6 @@ const safeExec = <T>(fn: () => T): Result<T> => {
   }
 };
 
-const CUSTOM_MIME_TYPES: Record<string, string> = {
-  "/install": "text/x-shellscript",
-};
-
 // List of recommended security headers as per https://owasp.org/www-satellite-secure-headers/
 // These headers enable browser security features (like limit access to platform apis and set
 // iFrame policies, etc.).
@@ -115,10 +111,7 @@ const buildResponse = ({
     headers: {
       ...headers,
       "content-type":
-        typeof mimeType === "string"
-          ? mimeType
-          : // TODO: should we deal with custom mime types?
-            (CUSTOM_MIME_TYPES[pathname] ?? "application/octet-stream"),
+        mimeType !== undefined && mimeType !== "" ? mimeType : "application/octet-stream",
       "content-length": `${bytes.length}`,
       ...(compressedAsset !== undefined && {
         "content-encoding": "br",
