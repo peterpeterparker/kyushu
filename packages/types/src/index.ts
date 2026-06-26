@@ -78,7 +78,7 @@ export interface WorkerRequest {
   /** The request headers as a key-value map, if present. */
   headers?: Record<string, string>;
   /** The request body, if present. */
-  body?: string | ArrayBuffer | Uint8Array;
+  body?: string | ArrayBuffer | Uint8Array<ArrayBuffer>;
 }
 
 /**
@@ -88,7 +88,7 @@ export interface WorkerResponse {
   /** The HTTP status code. Defaults to 200. */
   status?: number;
   /** The response body. */
-  body?: string | ArrayBuffer | Uint8Array;
+  body?: string | ArrayBuffer | Uint8Array<ArrayBuffer>;
   /** The response headers as a key-value map. */
   headers?: Record<string, string>;
 }

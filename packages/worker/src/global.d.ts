@@ -3,7 +3,7 @@ declare global {
    * A static asset bundled into the worker at build time.
    */
   interface Asset {
-    bytes: Uint8Array;
+    bytes: Uint8Array<ArrayBuffer>;
     mimeType?: string;
     lastModified?: number;
   }
