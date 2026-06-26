@@ -1,4 +1,4 @@
-use crate::assets::load_assets;
+use crate::assets::prepare_assets;
 use crate::config::{AssetsConfig, InputConfig, OutputConfig};
 use crate::javascript::bundle;
 use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerVersion};
@@ -38,12 +38,9 @@ async fn bundle_js(
 
     let bundle_str = bundle(src).await?;
 
-    // Load the static assets if a related source directory is provided.
+    // Precompress if needed and load the static assets if configured.
     let assets = assets_config
-        .map(|config| {
-            println!("Loading assets from {}...", config.dir());
-            load_assets(config.dir())
-        })
+        .map(|config| prepare_assets(config))
         .transpose()?;
 
     // Step 2: pre-initialize the worker Wasm template with the JS bundle using Wizer.

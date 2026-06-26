@@ -101,6 +101,25 @@ describe("fetch", () => {
     expect(res.headers?.["content-type"]).toBe("text/html");
   });
 
+  it("serves gzip compressed asset when accepted", async () => {
+    mockAssets["/index.html"] = {
+      bytes: new TextEncoder().encode("<html></html>"),
+      mimeType: "text/html",
+    };
+    mockAssets["/index.html.gz"] = {
+      bytes: new TextEncoder().encode("compressed"),
+      mimeType: undefined,
+    };
+    const res = await fetch({
+      method: "GET",
+      url: "http://localhost/index.html",
+      headers: { "accept-encoding": "gzip" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers?.["content-encoding"]).toBe("gz");
+    expect(res.headers?.["content-type"]).toBe("text/html");
+  });
+
   it("falls back to uncompressed when br not accepted", async () => {
     setAsset("/index.html", "<html></html>", "text/html");
     setAsset("/index.html.br", "compressed", undefined);
