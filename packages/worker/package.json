@@ -39,6 +39,9 @@
     "prepack": "npm run build",
     "test": "tsc --project tsconfig.spec.json --noEmit && vitest"
   },
+  "devDependencies": {
+    "vitest": "^4.1.7"
+  },
   "peerDependencies": {
     "kyushu-types": "workspace:*"
   }
