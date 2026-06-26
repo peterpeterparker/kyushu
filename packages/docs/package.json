@@ -30,6 +30,6 @@
   },
   "devDependencies": {
     "@types/mime-types": "^3.0.1",
-    "kyushu-types": "^0.0.3"
+    "kyushu-types": "workspace:*"
   }
 }
