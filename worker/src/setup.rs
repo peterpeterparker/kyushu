@@ -1,7 +1,6 @@
 use crate::bindings;
 use crate::runtime as worker_runtime;
 
-const TYPES_BUNDLE: &str = include_str!("../../packages/types/dist/index.mjs");
 const WORKER_BUNDLE: &str = include_str!("../../packages/worker/dist/index.mjs");
 
 pub fn initialize() {
@@ -14,10 +13,9 @@ pub fn initialize() {
     worker_runtime::load_assets();
     kyushu_runtime::add_additional_function(Box::new(|ctx| worker_runtime::init_get_asset(ctx)));
 
-    // Register @kyushu/types, @kyushu-worker and @kyushu/app as builtin modules before wizer_initialize()
+    // Register @kyushu-worker and @kyushu/app as builtin modules before wizer_initialize()
     // so they are wired into the QuickJS resolver and loader alongside the polyfill's
     // own modules, making them importable from the worker's fetch handler.
-    kyushu_runtime::add_additional_module("@kyushu/types", Box::new(|| TYPES_BUNDLE.to_string()));
     kyushu_runtime::add_additional_module("@kyushu/worker", Box::new(|| WORKER_BUNDLE.to_string()));
 
     let bundle = bindings::kyushu::worker::bundle::get_bundle();

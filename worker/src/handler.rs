@@ -115,21 +115,13 @@ async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
 
     let result = js_state.ctx.async_with(async |ctx| {
         let js_req = request.into_js(&ctx).map_err(|e| e.to_string())?;
-        ctx.globals().set("jsArgs", js_req).map_err(|e| e.to_string())?;
+        ctx.globals().set("jsRequest", js_req).map_err(|e| e.to_string())?;
 
         let promise = Module::evaluate(ctx.clone(), "@kyushu/handler", r#"
             import app from "@kyushu/app";
-            import { ExportedHandlerSchema, WorkerRequestSchema, WorkerResponseSchema } from "@kyushu/types";
-            import { buildEnv } from "@kyushu/worker";
+            import { handleRequest } from "@kyushu/worker";
 
-            const env = buildEnv();
-
-            const handler = ExportedHandlerSchema.parse(app);
-            const req = WorkerRequestSchema.parse(jsArgs);
-
-            const response = await handler.fetch(req, env);
-
-            const resp = WorkerResponseSchema.parse(response);
+            const resp = await handleRequest({ app, request: jsRequest });
 
             globalThis.jsResult = {
                 status: resp.status ?? 200,

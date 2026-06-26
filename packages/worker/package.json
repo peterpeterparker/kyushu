@@ -42,7 +42,7 @@
   "devDependencies": {
     "vitest": "^4.1.7"
   },
-  "peerDependencies": {
+  "dependencies": {
     "kyushu-types": "workspace:*"
   }
 }
