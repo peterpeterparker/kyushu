@@ -70,8 +70,9 @@ This guide uses `deploy` as username for deployment and `myapp` as your applicat
    :::
 
    ```bash
+   mkdir -p /home/deploy/.ssh
    nano /home/deploy/.ssh/authorized_keys
-   # Copy and paste the content of the public key manually
+   # Paste the content of your local ~/.ssh/deploy_key.pub
    chmod 600 /home/deploy/.ssh/authorized_keys
    ```
 
@@ -89,7 +90,7 @@ This guide uses `deploy` as username for deployment and `myapp` as your applicat
    Once added to GitHub Secrets, you can delete the private key from your local machine:
 
    ```bash
-   rm ~/.ssh/deploy_key
+    rm ~/.ssh/deploy_key ~/.ssh/deploy_key.pub
    ```
 
 7. **Create the GitHub Actions workflow**
@@ -149,7 +150,7 @@ This guide uses `deploy` as username for deployment and `myapp` as your applicat
              ssh deploy@${{ secrets.KYUSHU_HOST }} "sudo systemctl restart myapp"
    ```
 
-    Adjust `./dist/`, `/opt/myapp/` or copy other resources according your project requirements.
+   Adjust `./dist/`, `/opt/myapp/` or copy other resources according your project requirements.
 
 </Steps>
 
