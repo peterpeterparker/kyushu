@@ -115,16 +115,18 @@ This guide uses `deploy` as username for deployment and `myapp` as your applicat
              persist-credentials: false
 
          - name: Install kyu
-           run: curl -fsSL https://kyushu.dev/install | bash
+           run: |
+             curl -fsSL https://kyushu.dev/install | bash
+             echo "/root/.kyu/bin" >> $GITHUB_PATH
 
          - name: Build
            run: kyu build
 
          - name: Upload artifacts
-           uses: actions/upload-artifact@v4
+           uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
            with:
-             name: dist
-             path: dist/
+             name: worker
+             path: worker/
 
      deploy:
        needs: build
@@ -134,8 +136,8 @@ This guide uses `deploy` as username for deployment and `myapp` as your applicat
          - name: Download artifacts
            uses: actions/download-artifact@v4
            with:
-             name: dist
-             path: dist/
+             name: worker
+             path: worker/
 
          - name: Setup SSH
            run: |
@@ -146,11 +148,11 @@ This guide uses `deploy` as username for deployment and `myapp` as your applicat
 
          - name: Deploy
            run: |
-             rsync -avz ./dist/ deploy@${{ secrets.KYUSHU_HOST }}:/opt/myapp/
+             rsync -avz ./worker deploy@${{ secrets.KYUSHU_HOST }}:/opt/myapp/
              ssh deploy@${{ secrets.KYUSHU_HOST }} "sudo systemctl restart myapp"
    ```
 
-   Adjust `./dist/`, `/opt/myapp/` or copy other resources according your project requirements.
+   Adjust `/opt/myapp/` and add any additional resources your project requires.
 
 </Steps>
 
