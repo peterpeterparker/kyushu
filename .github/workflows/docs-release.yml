@@ -57,5 +57,5 @@ jobs:
 
       - name: Deploy
         run: |
-          rsync -avz ./worker deploy@${{ secrets.KYUSHU_HOST }}:/opt/kyushu/docs/
-          ssh deploy@${{ secrets.KYUSHU_HOST }} "sudo systemctl restart kyushu"
+          rsync -avz ./worker deploy-kyushu-docs@${{ secrets.KYUSHU_HOST }}:/opt/kyushu/docs/
+          ssh deploy-kyushu-docs@${{ secrets.KYUSHU_HOST }} "sudo systemctl restart kyushu"
