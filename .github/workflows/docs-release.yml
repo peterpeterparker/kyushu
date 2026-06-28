@@ -35,7 +35,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: worker
-          path: worker/
+          path: packages/docs/worker/
 
   deploy:
     needs: build
@@ -46,7 +46,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: worker
-          path: worker/
+          path: packages/docs/worker/
 
       - name: Setup SSH
         run: |
@@ -57,5 +57,5 @@ jobs:
 
       - name: Deploy
         run: |
-          rsync -avz ./worker deploy-kyushu-docs@${{ secrets.KYUSHU_HOST }}:/opt/kyushu/docs/
+          rsync -avz ./packages/docs/worker deploy-kyushu-docs@${{ secrets.KYUSHU_HOST }}:/opt/kyushu/docs/
           ssh deploy-kyushu-docs@${{ secrets.KYUSHU_HOST }} "sudo systemctl restart kyushu"
