@@ -76,7 +76,11 @@ export default defineConfig({
         },
         {
           label: "Guides",
-          items: [{ slug: "guides/static-assets" }, { slug: "guides/deploy" }],
+          items: [
+            { slug: "guides/static-assets" },
+            { slug: "guides/deploy" },
+            { slug: "guides/github-actions" },
+          ],
         },
         { slug: "known-limitations" },
         { slug: "security" },
