@@ -1,0 +1,165 @@
+---
+title: GitHub Actions
+description: How to automate the deployment of a Kyushu worker using GitHub Actions.
+---
+
+import { Steps } from "@astrojs/starlight/components";
+
+This guide covers automating the deployment of a Kyushu worker to a VPS using GitHub Actions.
+
+:::note
+This guide uses `deploy` as username for deployment and `myapp` as your application name. Adjust according to your needs.
+:::
+
+## Prerequisites
+
+- A VPS with Kyushu running as a systemd service (see [Deploy on a VPS](/guides/deploy))
+
+## Setup
+
+<Steps>
+
+1. **Generate an SSH key pair**
+
+   On your local machine, generate a key for the deployment:
+
+   ```bash
+   ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/deploy_key
+   ```
+
+   Leave the passphrase empty.
+
+   :::caution
+   Leaving the passphrase empty makes it easier to automate deployments with GitHub Actions. However, this requires securing the private key by limiting it to this use and storing it securely.
+   :::
+
+2. **Create a dedicated user on the VPS**
+
+   Rather than using root, create a user with limited privileges:
+
+   :::tip
+   Creating one deploy user per app - if you host multiple - is the cleanest approach as it scopes permissions to its own service.
+   :::
+
+   ```bash
+   useradd -m -s /bin/bash deploy
+   mkdir -p /home/deploy/.ssh
+   chmod 700 /home/deploy/.ssh
+   ```
+
+3. **Grant the user privileges for deployment**
+
+   Grant write access to your worker directory:
+
+   ```bash
+   chown -R deploy:deploy /opt/myapp
+   ```
+
+   And allow the user to restart Kyushu without a password:
+
+   ```bash
+   echo "deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart myapp" > /etc/sudoers.d/myapp-deploy
+   ```
+
+4. **Add public key to the server**
+
+   Copy the content of your public key to the user's `authorized_keys` file on the VPS.
+
+   :::note
+   This allows the authentication via SSH using the key pair.
+   :::
+
+   ```bash
+   mkdir -p /home/deploy/.ssh
+   nano /home/deploy/.ssh/authorized_keys
+   # Paste the content of your local ~/.ssh/deploy_key.pub
+   chmod 600 /home/deploy/.ssh/authorized_keys
+   ```
+
+5. **Add secrets to your GitHub repository**
+
+   In your repository on GitHub, go to **Settings → Secrets and variables → Actions** and add:
+
+   | Secret           | Value                                         |
+   | ---------------- | --------------------------------------------- |
+   | `KYUSHU_SSH_KEY` | Contents of `~/.ssh/deploy_key` (private key) |
+   | `KYUSHU_HOST`    | Your VPS IP or hostname                       |
+
+6. **Delete the local private key (optional)**
+
+   Once added to GitHub Secrets, you can delete the private key from your local machine:
+
+   ```bash
+    rm ~/.ssh/deploy_key ~/.ssh/deploy_key.pub
+   ```
+
+7. **Create the GitHub Actions workflow**
+
+   Lastly, setup the deployment pipeline by creating `.github/workflows/deploy.yml`:
+
+   ```yaml title=".github/workflows/deploy.yml"
+   name: Deploy
+
+   on:
+     push:
+       branches: [main]
+
+   jobs:
+     build:
+       runs-on: ubuntu-latest
+
+       steps:
+         - name: Checkout
+           uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+           with:
+             persist-credentials: false
+
+         - name: Install kyu
+           run: |
+             curl -fsSL https://kyushu.dev/install | bash
+             echo "/root/.kyu/bin" >> $GITHUB_PATH
+
+         - name: Build
+           run: kyu build
+
+         - name: Upload artifacts
+           uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+           with:
+             name: worker
+             path: worker/
+
+     deploy:
+       needs: build
+       runs-on: ubuntu-latest
+
+       steps:
+         - name: Download artifacts
+           uses: actions/download-artifact@v4
+           with:
+             name: worker
+             path: worker/
+
+         - name: Setup SSH
+           run: |
+             mkdir -p ~/.ssh
+             echo "${{ secrets.KYUSHU_SSH_KEY }}" > ~/.ssh/id_ed25519
+             chmod 600 ~/.ssh/id_ed25519
+             ssh-keyscan -H ${{ secrets.KYUSHU_HOST }} >> ~/.ssh/known_hosts
+
+         - name: Deploy
+           run: |
+             rsync -avz ./worker deploy@${{ secrets.KYUSHU_HOST }}:/opt/myapp/
+             ssh deploy@${{ secrets.KYUSHU_HOST }} "sudo systemctl restart myapp"
+   ```
+
+   Adjust `/opt/myapp/` and add any additional resources your project requires.
+
+</Steps>
+
+## Verify
+
+Push a change to your main branch, then check the **Actions** tab in your GitHub repository. Once the workflow completes, verify the deployment:
+
+```bash
+curl https://yourdomain.com
+```
