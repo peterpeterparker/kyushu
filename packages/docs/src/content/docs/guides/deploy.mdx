@@ -34,24 +34,31 @@ This guide covers deploying a Kyushu worker on a fresh VPS. The example uses Het
 
 3. **Deploy your worker**
 
-   Copy your built artifacts to the VPS — the `kyushu.toml`, the compiled wasm, and any static files:
+   Copy the worker to the VPS:
 
    ```bash
-   mkdir -p /opt/yourwebsite
-   rsync -av ./dist user@yourserver:/opt/yourwebsite/ # For example
+   mkdir -p /opt/myapp
+   rsync -av ./worker user@yourserver:/opt/myapp/
+   ```
+
+   If your worker uses a config file or static assets, copy those too:
+
+   ```bash
+   rsync -av kyushu.toml ./assets/ user@yourserver:/opt/myapp/
+   rsync -av ./public user@yourserver:/opt/myapp/
    ```
 
 4. **Create a systemd service**
 
    ```bash
-   cat > /etc/systemd/system/kyushu.service << 'EOF'
+   cat > /etc/systemd/system/myapp.service << 'EOF'
    [Unit]
-   Description=Your Site
+   Description=My Application
    After=network.target
 
    [Service]
-   ExecStart=/root/.cargo/bin/kyu run kyushu.toml
-   WorkingDirectory=/opt/yourwebsite
+   ExecStart=/root/.kyu/bin/kyu run # Add kyushu.toml if you use one
+   WorkingDirectory=/opt/myapp
    Restart=on-failure
    RestartSec=5
 
@@ -60,9 +67,9 @@ This guide covers deploying a Kyushu worker on a fresh VPS. The example uses Het
    EOF
 
    systemctl daemon-reload
-   systemctl enable kyushu
-   systemctl start kyushu
-   systemctl status kyushu
+   systemctl enable myapp
+   systemctl start myapp
+   systemctl status myapp
    ```
 
    The service starts automatically on boot and restarts on failure.
@@ -108,7 +115,7 @@ See [GitHub Actions](/guides/github-actions) to automate deployments.
 To manually deploy a new release, stop the service, replace the files, and restart:
 
 ```bash
-systemctl stop kyushu
-# copy your updated artifacts to /opt/yourwebsite
-systemctl start kyushu
+systemctl stop myapp
+# copy your updated artifacts to /opt/myapp
+systemctl start myapp
 ```
