@@ -73,6 +73,7 @@ This guide uses `myuser` as username for deployment and `myapp` as your applicat
    ```bash
    nano /home/myuser/.ssh/authorized_keys
    # Paste the content of your local ~/.ssh/myuser_key.pub
+   chown myuser:myuser /home/myuser/.ssh/authorized_keys
    chmod 600 /home/myuser/.ssh/authorized_keys
    ```
 
