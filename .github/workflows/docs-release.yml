@@ -4,12 +4,11 @@ on:
   push:
     tags:
       - "docs/v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout
@@ -17,12 +16,43 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build site
-        run: |
-          docker build --target export --output type=local,dest=. -f Dockerfile.docs .
+      - name: Prepare
+        uses: ./.github/actions/prepare
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+      - name: Install kyu
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/peterpeterparker/kyushu/releases/download/cli/v0.1.0/kyushu-cli-installer.sh | sh
+          echo "/root/.kyu/bin" >> $GITHUB_PATH
+
+      - name: Build
+        working-directory: packages/docs
+        run: kyu build kyushu.toml
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          files: docs.tar.gz
-          name: ${{ github.ref_name }}
+          name: worker
+          path: worker/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: worker
+          path: worker/
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.KYUSHU_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.KYUSHU_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        run: |
+          rsync -avz ./worker deploy@${{ secrets.KYUSHU_HOST }}:/opt/kyushu/docs/
+          ssh deploy@${{ secrets.KYUSHU_HOST }} "sudo systemctl restart kyushu"
