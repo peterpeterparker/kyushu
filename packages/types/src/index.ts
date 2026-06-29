@@ -36,11 +36,18 @@ export const WorkerResponseSchema = z.strictObject({
 });
 
 /**
+ * @see AssetFetchOptions
+ */
+export const AssetFetchOptionsSchema = z.strictObject({
+  src: z.enum(["memory", "mount"]),
+});
+
+/**
  * @see EnvAssets
  */
 export const EnvAssetsSchema = z.strictObject({
   fetch: z.function({
-    input: z.tuple([WorkerRequestSchema]),
+    input: z.tuple([WorkerRequestSchema, z.optional(AssetFetchOptionsSchema)]),
     output: z.promise(WorkerResponseSchema),
   }),
 });
@@ -94,10 +101,19 @@ export interface WorkerResponse {
 }
 
 /**
+ * Options for `env.ASSETS.fetch()`.
+ * Controls the source from which assets are served. Defaults to `"memory"`.
+ */
+export interface AssetFetchOptions {
+  /** The source to fetch assets from. */
+  src: "memory" | "mount";
+}
+
+/**
  * Fetch and serve static assets.
  */
 export interface EnvAssets {
-  fetch(request: WorkerRequest): Promise<WorkerResponse>;
+  fetch(request: WorkerRequest, options?: AssetFetchOptions): Promise<WorkerResponse>;
 }
 
 /**

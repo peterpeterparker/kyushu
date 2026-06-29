@@ -1,4 +1,5 @@
 import {
+  AssetFetchOptionsSchema,
   EnvAssetsSchema,
   EnvSchema,
   ExportedHandlerSchema,
@@ -196,5 +197,27 @@ describe("EnvSchema", () => {
         extra: "field",
       }),
     ).toThrow();
+  });
+});
+
+describe("AssetFetchOptionsSchema", () => {
+  it("accepts memory src", () => {
+    expect(() => AssetFetchOptionsSchema.parse({ src: "memory" })).not.toThrow();
+  });
+
+  it("accepts mount src", () => {
+    expect(() => AssetFetchOptionsSchema.parse({ src: "mount" })).not.toThrow();
+  });
+
+  it("rejects missing src", () => {
+    expect(() => AssetFetchOptionsSchema.parse({})).toThrow();
+  });
+
+  it("rejects invalid src", () => {
+    expect(() => AssetFetchOptionsSchema.parse({ src: "disk" })).toThrow();
+  });
+
+  it("rejects extra keys", () => {
+    expect(() => AssetFetchOptionsSchema.parse({ src: "memory", extra: "field" })).toThrow();
   });
 });

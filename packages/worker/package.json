@@ -31,9 +31,11 @@
     "test": "tsc --project tsconfig.spec.json --noEmit && vitest"
   },
   "dependencies": {
-    "kyushu-types": "workspace:*"
+    "kyushu-types": "workspace:*",
+    "mime-types": "^3.0.2"
   },
   "devDependencies": {
+    "@types/mime-types": "^3.0.1",
     "vitest": "^4.1.7"
   }
 }

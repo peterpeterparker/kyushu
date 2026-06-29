@@ -2,7 +2,7 @@ declare global {
   /**
    * A static asset bundled into the worker at build time.
    */
-  interface Asset {
+  interface WorkerAsset {
     bytes: Uint8Array<ArrayBuffer>;
     mimeType?: string;
     lastModified?: number;
@@ -13,7 +13,7 @@ declare global {
    *
    * @throws If no assets are configured.
    */
-  function __kyushu_get_asset__(path: string): Asset | undefined;
+  function __kyushu_get_asset__(path: string): WorkerAsset | undefined;
 
   /**
    * Returns `true` if static assets are configured for this worker.
