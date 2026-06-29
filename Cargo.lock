@@ -2287,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "kyushu-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "brotli 8.0.4",
@@ -2376,7 +2376,7 @@ dependencies = [
 
 [[package]]
 name = "kyushu-worker"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "kyushu-runtime",
  "rquickjs",
