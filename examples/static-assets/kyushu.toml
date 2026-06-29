@@ -1,0 +1,6 @@
+[assets]
+dir = "public"
+
+[[worker.mounts]]
+host = "./static"
+guest = "/static"
