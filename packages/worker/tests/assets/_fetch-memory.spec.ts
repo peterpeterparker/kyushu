@@ -1,6 +1,6 @@
-import { fetch } from "../src/assets";
+import { fetchFromMemory as fetch } from "../../src/assets/_fetch-memory";
 
-const mockAssets: Record<string, Asset> = {};
+const mockAssets: Record<string, WorkerAsset> = {};
 
 vi.stubGlobal("__kyushu_get_asset__", (path: string) => mockAssets[path]);
 
@@ -15,7 +15,7 @@ afterEach(() => {
   Object.keys(mockAssets).forEach((k) => delete mockAssets[k]);
 });
 
-describe("fetch", () => {
+describe("_fetch-memory", () => {
   it("returns 405 for non-GET/HEAD methods", async () => {
     const res = await fetch({ method: "POST", url: "http://localhost/" });
     expect(res.status).toBe(405);
