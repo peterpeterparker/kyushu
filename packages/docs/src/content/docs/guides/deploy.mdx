@@ -57,7 +57,7 @@ This guide covers deploying a Kyushu worker on a fresh VPS. The example uses Het
    After=network.target
 
    [Service]
-   ExecStart=/root/.kyu/bin/kyu run # Add kyushu.toml if you use one
+   ExecStart=/root/.kyu/bin/kyu run
    WorkingDirectory=/opt/myapp
    Restart=on-failure
    RestartSec=5
@@ -76,6 +76,17 @@ This guide covers deploying a Kyushu worker on a fresh VPS. The example uses Het
 
 5. **Configure Caddy**
 
+   Start by adding the DNS records in your domain registrar’s dashboard:
+
+   | Type | Name | Value                                 |
+   | ---- | ---- | ------------------------------------- |
+   | A    | `@`  | Your VPS IPv4 (`curl -4 ifconfig.me`) |
+   | AAAA | `@`  | Your VPS IPv6 (`curl -6 ifconfig.me`) |
+
+   :::note
+   Depending on your use case, you may also want to add `www` or subdomain records (e.g. `api` instead of root `@`).
+   :::
+
    Once your domain's DNS has propagated, configure Caddy as a reverse proxy. Check propagation first:
 
    ```bash
@@ -83,6 +94,10 @@ This guide covers deploying a Kyushu worker on a fresh VPS. The example uses Het
    ```
 
    Then write the Caddyfile:
+
+   :::caution
+   If you already have other domains configured in your Caddyfile, add the new block without overwriting the existing ones.
+   :::
 
    ```bash
    cat > /etc/caddy/Caddyfile << 'EOF'
