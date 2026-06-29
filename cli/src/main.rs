@@ -8,6 +8,7 @@ mod config;
 mod dev;
 mod javascript;
 mod runner;
+mod scripts;
 mod server;
 mod worker;
 
@@ -75,12 +76,16 @@ async fn main() -> Result<()> {
             .await?;
         }
         Cli::Build { .. } => {
+            scripts::run_prebuild_scripts(&config.scripts)?;
+
             builder::build(
                 &config.input.unwrap_or_default(),
                 &config.output.unwrap_or_default(),
                 config.assets.as_ref(),
             )
             .await?;
+
+            scripts::run_postbuild_scripts(&config.scripts)?;
         }
         Cli::Dev { .. } => {
             dev::dev(
@@ -199,5 +204,20 @@ mod tests {
         let config = read_config(None).unwrap();
         std::env::set_current_dir(original).unwrap();
         assert!(config.dev.is_none());
+    }
+
+    #[test]
+    fn test_read_config_valid_scripts_section() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(
+            &path,
+            "[scripts]\nprebuild = [\"echo pre\"]\npostbuild = [\"echo post\"]",
+        )
+        .unwrap();
+        let config = read_config(Some(path.to_str().unwrap())).unwrap();
+        let scripts = config.scripts.unwrap();
+        assert_eq!(scripts.prebuild.unwrap(), vec!["echo pre"]);
+        assert_eq!(scripts.postbuild.unwrap(), vec!["echo post"]);
     }
 }

@@ -29,6 +29,21 @@ src = "src/server.ts"
 dir = "dist"
 ```
 
+## Scripts
+
+Run shell commands before or after `kyu build`. Useful for example when using static assets, to build your frontend app or website beforehand.
+
+```toml
+[scripts]
+prebuild = ["pnpm build"]
+postbuild = ["echo done"]
+```
+
+| Field               | Type  | Default | Description                        |
+| ------------------- | ----- | ------- | ---------------------------------- |
+| `scripts.prebuild`  | array | —       | Commands to run before `kyu build` |
+| `scripts.postbuild` | array | —       | Commands to run after `kyu build`  |
+
 ## Assets
 
 Controls static asset bundling during `kyu build`. See the [Static Assets guide](/guides/static-assets) for setup instructions.

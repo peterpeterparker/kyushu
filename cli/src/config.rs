@@ -12,6 +12,7 @@ pub struct KyuConfig {
     pub output: Option<OutputConfig>,
     pub assets: Option<AssetsConfig>,
     pub worker: Option<WorkerConfig>,
+    pub scripts: Option<ScriptsConfig>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -47,6 +48,12 @@ pub struct AssetsConfig {
 pub struct WorkerConfig {
     pub mounts: Option<Vec<MountConfig>>,
     pub env: Option<Vec<EnvConfig>>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+pub struct ScriptsConfig {
+    pub prebuild: Option<Vec<String>>,
+    pub postbuild: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, Clone)]
