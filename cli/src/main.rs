@@ -89,3 +89,88 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_read_config_no_path_returns_default() {
+        let config = read_config(None).unwrap();
+        assert!(config.dev.is_none());
+    }
+
+    #[test]
+    fn test_read_config_explicit_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(&path, "[dev]\nport = 5678").unwrap();
+        let config = read_config(Some(path.to_str().unwrap())).unwrap();
+        assert_eq!(config.dev.unwrap().port(), 5678);
+    }
+
+    #[test]
+    fn test_read_config_nonexistent_path_returns_default() {
+        let config = read_config(Some("/nonexistent/path.toml")).unwrap();
+        assert!(config.dev.is_none());
+    }
+
+    #[test]
+    fn test_read_config_empty_file_returns_default() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(&path, "").unwrap();
+        let config = read_config(Some(path.to_str().unwrap())).unwrap();
+        assert!(config.dev.is_none());
+    }
+
+    #[test]
+    fn test_read_config_valid_dev_section() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(&path, "[dev]\nport = 1234\nwatch = false").unwrap();
+        let config = read_config(Some(path.to_str().unwrap())).unwrap();
+        let dev = config.dev.unwrap();
+        assert_eq!(dev.port(), 1234);
+        assert!(!dev.watch());
+    }
+
+    #[test]
+    fn test_read_config_valid_input_section() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(&path, "[input]\nsrc = \"src/worker.ts\"").unwrap();
+        let config = read_config(Some(path.to_str().unwrap())).unwrap();
+        assert_eq!(config.input.unwrap().src(), "src/worker.ts");
+    }
+
+    #[test]
+    fn test_read_config_valid_output_section() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(&path, "[output]\ndir = \"dist\"\nfile = \"worker.wasm\"").unwrap();
+        let config = read_config(Some(path.to_str().unwrap())).unwrap();
+        let output = config.output.unwrap();
+        assert_eq!(output.dir(), "dist");
+        assert_eq!(output.file(), "worker.wasm");
+    }
+
+    #[test]
+    fn test_read_config_valid_assets_section() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(&path, "[assets]\ndir = \"public\"").unwrap();
+        let config = read_config(Some(path.to_str().unwrap())).unwrap();
+        assert_eq!(config.assets.unwrap().dir(), "public");
+    }
+
+    #[test]
+    fn test_read_config_invalid_toml_returns_error() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("custom.toml");
+        fs::write(&path, "not valid toml [[[").unwrap();
+        assert!(read_config(Some(path.to_str().unwrap())).is_err());
+    }
+}
