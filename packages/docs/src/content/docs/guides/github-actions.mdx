@@ -115,14 +115,12 @@ This guide uses `myuser` as username for deployment and `myapp` as your applicat
            with:
              persist-credentials: false
 
-         # TODO: If required, install and build your application here
-
          - name: Install kyu
            run: |
              curl -fsSL https://kyushu.dev/install | bash
              echo "/root/.kyu/bin" >> $GITHUB_PATH
 
-         - name: Build worker
+         - name: Build
            run: kyu build
 
          - name: Upload artifacts
