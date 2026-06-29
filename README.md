@@ -124,9 +124,9 @@ export default {
 
 ### `Env`
 
-| Field    | Type                       | Description                                           |
-| -------- | -------------------------- | ----------------------------------------------------- |
-| `ASSETS` | `EnvAssets` \| `undefined` | Available when `[assets]` is configured in `kyu.toml` |
+| Field    | Type        | Description                                                                      |
+| -------- | ----------- | -------------------------------------------------------------------------------- |
+| `ASSETS` | `EnvAssets` | Serves static assets. Returns `501 Not Implemented` if no assets are configured. |
 
 #### `EnvAssets`
 
