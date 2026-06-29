@@ -80,11 +80,11 @@ Provides access to static assets bundled into the worker at build time or read f
 
 ### `AssetFetchOptions`
 
-The default approach to serve static asset is bundling and serving them to memory. But you might need to read those from a mounted folder, notably if you hit some memory limitation when bundling the worker.
+The default approach to serve static asset is bundling and serving them to memory. But you might need to read those from the file-system, notably if you hit some memory limitation when bundling the worker.
 
-| Field | Type                    | Description                      |
-| ----- | ----------------------- | -------------------------------- |
-| `src` | `"memory"` \| `"mount"` | The source to fetch assets from. |
+| Field | Type                 | Description                      |
+| ----- | -------------------- | -------------------------------- |
+| `src` | `"memory"` \| `"fs"` | The source to fetch assets from. |
 
 ## WorkerMethod
 

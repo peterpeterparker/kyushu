@@ -136,9 +136,9 @@ export default {
 
 #### `AssetFetchOptions`
 
-| Field | Type                    | Description                      |
-| ----- | ----------------------- | -------------------------------- |
-| `src` | `"memory"` \| `"mount"` | The source to fetch assets from. |
+| Field | Type                 | Description                      |
+| ----- | -------------------- | -------------------------------- |
+| `src` | `"memory"` \| `"fs"` | The source to fetch assets from. |
 
 ## Static assets
 
