@@ -6,11 +6,7 @@ const CUSTOM_MIME_TYPES: Record<string, string> = {
 
 export default {
   async fetch(request, env) {
-    const response = await env.ASSETS?.fetch(request);
-
-    if (response === undefined) {
-      return { status: 500, body: "Internal Server Error" };
-    }
+    const response = await env.ASSETS.fetch(request);
 
     const { pathname } = URL.parse(request.url) ?? { pathname: null };
     const customMimeType = pathname != null ? CUSTOM_MIME_TYPES[pathname] : undefined;
