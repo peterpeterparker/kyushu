@@ -157,7 +157,7 @@ kyu dev [config]     Start a local development server with hot-reload
 kyu --version        Print the CLI version
 ```
 
-All commands accept an optional config file. Pass a path to override the defaults.
+All commands accept an optional path to a config file. If omitted, `kyu` looks for a `kyushu.toml` in the current directory and falls back to defaults if none is found.
 
 ## Config reference
 
