@@ -175,25 +175,26 @@ describe("EnvAssetsSchema", () => {
 });
 
 describe("EnvSchema", () => {
-  it("accepts empty env", () => {
-    expect(() => EnvSchema.parse({})).not.toThrow();
-  });
-
   it("accepts env with ASSETS", () => {
     expect(() =>
       EnvSchema.parse({ ASSETS: { fetch: async (_req: unknown) => ({ status: 200 }) } }),
     ).not.toThrow();
   });
 
-  it("accepts env without ASSETS", () => {
-    expect(() => EnvSchema.parse({ ASSETS: undefined })).not.toThrow();
-  });
-
-  it("rejects extra keys", () => {
-    expect(() => EnvSchema.parse({ extra: "field" })).toThrow();
+  it("rejects missing ASSETS", () => {
+    expect(() => EnvSchema.parse({})).toThrow();
   });
 
   it("rejects invalid ASSETS", () => {
     expect(() => EnvSchema.parse({ ASSETS: { fetch: "not-a-function" } })).toThrow();
+  });
+
+  it("rejects extra keys", () => {
+    expect(() =>
+      EnvSchema.parse({
+        ASSETS: { fetch: async (_req: unknown) => ({ status: 200 }) },
+        extra: "field",
+      }),
+    ).toThrow();
   });
 });
