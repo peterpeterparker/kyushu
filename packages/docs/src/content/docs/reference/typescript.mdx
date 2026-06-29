@@ -66,17 +66,25 @@ The HTTP response returned by the `fetch` handler.
 
 The environment object passed as the second argument to the `fetch` handler.
 
-| Field    | Type        | Description                                                                      |
-| -------- | ----------- | -------------------------------------------------------------------------------- |
-| `ASSETS` | `EnvAssets` | Serves static assets. Returns `501 Not Implemented` if no assets are configured. |
+| Field    | Type        | Description                         |
+| -------- | ----------- | ----------------------------------- |
+| `ASSETS` | `EnvAssets` | Provides features to handle assets. |
 
 ### EnvAssets
 
-Provides access to static assets bundled into the worker at build time. See the [Static Assets guide](/guides/static-assets) for setup instructions.
+Provides access to static assets bundled into the worker at build time or read from mounted file system. See the [Static Assets guide](/guides/static-assets) for the instructions to set up the former.
 
-| Method  | Signature                                             | Description          |
-| ------- | ----------------------------------------------------- | -------------------- |
-| `fetch` | `(request: WorkerRequest) => Promise<WorkerResponse>` | Serve a static asset |
+| Method  | Signature                                                                          | Description                                                        |
+| ------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `fetch` | `(request: WorkerRequest, options?: AssetFetchOptions) => Promise<WorkerResponse>` | Serve a static asset. Defaults to handling assets from `"memory"`. |
+
+### `AssetFetchOptions`
+
+The default approach to serve static asset is bundling and serving them to memory. But you might need to read those from a mounted folder, notably if you hit some memory limitation when bundling the worker.
+
+| Field | Type                    | Description                      |
+| ----- | ----------------------- | -------------------------------- |
+| `src` | `"memory"` \| `"mount"` | The source to fetch assets from. |
 
 ## WorkerMethod
 

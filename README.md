@@ -124,15 +124,21 @@ export default {
 
 ### `Env`
 
-| Field    | Type        | Description                                                                      |
-| -------- | ----------- | -------------------------------------------------------------------------------- |
-| `ASSETS` | `EnvAssets` | Serves static assets. Returns `501 Not Implemented` if no assets are configured. |
+| Field    | Type        | Description                         |
+| -------- | ----------- | ----------------------------------- |
+| `ASSETS` | `EnvAssets` | Provides features to handle assets. |
 
 #### `EnvAssets`
 
-| Method  | Signature                                             | Description          |
-| ------- | ----------------------------------------------------- | -------------------- |
-| `fetch` | `(request: WorkerRequest) => Promise<WorkerResponse>` | Serve a static asset |
+| Method  | Signature                                                                          | Description                                                        |
+| ------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `fetch` | `(request: WorkerRequest, options?: AssetFetchOptions) => Promise<WorkerResponse>` | Serve a static asset. Defaults to handling assets from `"memory"`. |
+
+#### `AssetFetchOptions`
+
+| Field | Type                    | Description                      |
+| ----- | ----------------------- | -------------------------------- |
+| `src` | `"memory"` \| `"mount"` | The source to fetch assets from. |
 
 ## Static assets
 
