@@ -19,17 +19,14 @@ jobs:
       - name: Prepare
         uses: ./.github/actions/prepare
 
-      - name: Build documentation
-        run: pnpm --filter kyushu-docs build
-
       - name: Install kyu
         run: |
           curl --proto '=https' --tlsv1.2 -LsSf https://github.com/peterpeterparker/kyushu/releases/download/cli/v0.1.0/kyushu-cli-installer.sh | sh
           echo "/root/.kyu/bin" >> $GITHUB_PATH
 
-      - name: Build worker
+      - name: Build
         working-directory: packages/docs
-        run: kyu build kyushu.toml
+        run: kyu build
 
       - name: Upload artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

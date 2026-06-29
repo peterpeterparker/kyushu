@@ -4,3 +4,6 @@ src = "src/server.ts"
 [assets]
 dir = "dist"
 precompress = ["brotli"]
+
+[scripts]
+prebuild = ["pnpm build"]
