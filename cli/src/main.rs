@@ -34,6 +34,12 @@ enum Cli {
 }
 
 fn read_config(config_path: Option<&str>) -> Result<KyuConfig> {
+    let config_path = config_path.or_else(|| {
+        std::path::Path::new("kyushu.toml")
+            .exists()
+            .then_some("kyushu.toml")
+    });
+
     let Some(config_path) = config_path else {
         return Ok(KyuConfig::default());
     };
@@ -172,5 +178,26 @@ mod tests {
         let path = dir.path().join("custom.toml");
         fs::write(&path, "not valid toml [[[").unwrap();
         assert!(read_config(Some(path.to_str().unwrap())).is_err());
+    }
+
+    #[test]
+    fn test_read_config_falls_back_to_kyushu_toml() {
+        let dir = tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        fs::write(dir.path().join("kyushu.toml"), "[dev]\nport = 9999").unwrap();
+        let config = read_config(None).unwrap();
+        std::env::set_current_dir(original).unwrap();
+        assert_eq!(config.dev.unwrap().port(), 9999);
+    }
+
+    #[test]
+    fn test_read_config_no_path_no_kyushu_toml_returns_default() {
+        let dir = tempdir().unwrap();
+        let original = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let config = read_config(None).unwrap();
+        std::env::set_current_dir(original).unwrap();
+        assert!(config.dev.is_none());
     }
 }
