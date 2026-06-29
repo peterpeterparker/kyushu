@@ -66,9 +66,9 @@ The HTTP response returned by the `fetch` handler.
 
 The environment object passed as the second argument to the `fetch` handler.
 
-| Field    | Type                       | Description                                           |
-| -------- | -------------------------- | ----------------------------------------------------- |
-| `ASSETS` | `EnvAssets` \| `undefined` | Available when `[assets]` is configured in `kyu.toml` |
+| Field    | Type        | Description                                                                      |
+| -------- | ----------- | -------------------------------------------------------------------------------- |
+| `ASSETS` | `EnvAssets` | Serves static assets. Returns `501 Not Implemented` if no assets are configured. |
 
 ### EnvAssets
 
