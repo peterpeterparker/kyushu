@@ -49,7 +49,7 @@ export const EnvAssetsSchema = z.strictObject({
  * @see Env
  */
 export const EnvSchema = z.strictObject({
-  ASSETS: z.optional(EnvAssetsSchema),
+  ASSETS: EnvAssetsSchema,
 });
 
 /**
@@ -104,8 +104,8 @@ export interface EnvAssets {
  * The environment object passed to the worker's fetch handler.
  */
 export interface Env {
-  /** Static assets are available when `[assets]` is configured. */
-  ASSETS?: EnvAssets;
+  /** Static assets. Returns 501 if no assets are configured. */
+  ASSETS: EnvAssets;
 }
 
 /**
