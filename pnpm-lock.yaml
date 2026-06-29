@@ -244,6 +244,12 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0
 
+  examples/static-assets:
+    devDependencies:
+      kyushu-types:
+        specifier: workspace:*
+        version: link:../../packages/types
+
   packages/builder:
     devDependencies:
       esbuild:
