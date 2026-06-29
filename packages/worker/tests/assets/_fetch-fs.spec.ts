@@ -1,9 +1,9 @@
-import { fetchFromMount as fetch } from "../../src/assets/_fetch-mount";
+import { fetchFromFs as fetch } from "../../src/assets/_fetch-fs";
 import { writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-describe("_fetch-mount", () => {
+describe("_fetch-fs", () => {
   let dir: string;
 
   beforeEach(async () => {

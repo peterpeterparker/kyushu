@@ -205,8 +205,8 @@ describe("AssetFetchOptionsSchema", () => {
     expect(() => AssetFetchOptionsSchema.parse({ src: "memory" })).not.toThrow();
   });
 
-  it("accepts mount src", () => {
-    expect(() => AssetFetchOptionsSchema.parse({ src: "mount" })).not.toThrow();
+  it("accepts fs src", () => {
+    expect(() => AssetFetchOptionsSchema.parse({ src: "fs" })).not.toThrow();
   });
 
   it("rejects missing src", () => {

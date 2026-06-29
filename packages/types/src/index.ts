@@ -39,7 +39,7 @@ export const WorkerResponseSchema = z.strictObject({
  * @see AssetFetchOptions
  */
 export const AssetFetchOptionsSchema = z.strictObject({
-  src: z.enum(["memory", "mount"]),
+  src: z.enum(["memory", "fs"]),
 });
 
 /**
@@ -106,7 +106,7 @@ export interface WorkerResponse {
  */
 export interface AssetFetchOptions {
   /** The source to fetch assets from. */
-  src: "memory" | "mount";
+  src: "memory" | "fs";
 }
 
 /**
@@ -120,7 +120,7 @@ export interface EnvAssets {
  * The environment object passed to the worker's fetch handler.
  */
 export interface Env {
-  /** Static assets. Returns 501 if no assets are configured. */
+  /** Static assets handling. */
   ASSETS: EnvAssets;
 }
 

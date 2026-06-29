@@ -15,6 +15,6 @@ export default {
       return responseFromMemory;
     }
 
-    return await env.ASSETS.fetch(request, { src: "mount" });
+    return await env.ASSETS.fetch(request, { src: "fs" });
   },
 } satisfies ExportedHandler;

@@ -4,7 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { resolveAndFetch } from "./_fetch";
 import mime from "mime-types";
 
-export const fetchFromMount: EnvAssets["fetch"] = async (request) => {
+export const fetchFromFs: EnvAssets["fetch"] = async (request) => {
   return await resolveAndFetch({
     request,
     getAssetFn: getAsset,
