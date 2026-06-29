@@ -182,6 +182,21 @@ file = "__kyushu_worker.wasm"  # default
 | `output.dir`  | string | `worker`               | Output directory for the built worker             |
 | `output.file` | string | `__kyushu_worker.wasm` | Output filename for the built worker              |
 
+### Scripts
+
+Run shell commands before or after `kyu build`. Useful for example when using static assets, to build your frontend app or website beforehand.
+
+```toml
+[scripts]
+prebuild = ["pnpm build"]
+postbuild = ["echo done"]
+```
+
+| Field               | Type  | Default | Description                        |
+| ------------------- | ----- | ------- | ---------------------------------- |
+| `scripts.prebuild`  | array | —       | Commands to run before `kyu build` |
+| `scripts.postbuild` | array | —       | Commands to run after `kyu build`  |
+
 ### Assets
 
 Configure static asset bundling.
