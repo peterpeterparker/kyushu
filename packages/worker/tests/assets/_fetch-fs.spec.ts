@@ -65,4 +65,11 @@ describe("_fetch-fs", () => {
     });
     expect(res2.status).toBe(304);
   });
+
+  it("resolves / to /index.html on disk", async () => {
+    const filepath = join(dir, "index.html");
+    await writeFile(filepath, "<html></html>");
+    const res = await fetch({ method: "GET", url: `http://localhost${dir}/` });
+    expect(res.status).toBe(200);
+  });
 });

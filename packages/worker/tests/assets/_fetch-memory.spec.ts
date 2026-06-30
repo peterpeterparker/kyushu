@@ -152,4 +152,28 @@ describe("_fetch-memory", () => {
     const res = await fetch({ method: "GET", url: "http://localhost/index.html" });
     expect(res.headers?.["last-modified"]).toBeUndefined();
   });
+
+  it("serves compressed asset when resolved via alias (/)", async () => {
+    setAsset("/index.html", "<html></html>", "text/html");
+    setAsset("/index.html.br", "compressed", undefined);
+    const res = await fetch({
+      method: "GET",
+      url: "http://localhost/",
+      headers: { "accept-encoding": "br" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers?.["content-encoding"]).toBe("br");
+  });
+
+  it("serves compressed asset when resolved via alias (/about -> /about.html)", async () => {
+    setAsset("/about.html", "<html></html>", "text/html");
+    setAsset("/about.html.gz", "compressed", undefined);
+    const res = await fetch({
+      method: "GET",
+      url: "http://localhost/about",
+      headers: { "accept-encoding": "gzip" },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers?.["content-encoding"]).toBe("gz");
+  });
 });

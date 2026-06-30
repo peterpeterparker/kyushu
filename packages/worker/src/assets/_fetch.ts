@@ -1,6 +1,6 @@
 import type { WorkerRequest } from "kyushu-types";
 import { buildAssetResponse } from "./_response";
-import { CompressedAsset, CompressionEncoding, GetAssetFn } from "./_types";
+import { Asset, CompressedAsset, CompressionEncoding, GetAssetFn } from "./_types";
 
 type Result<T> = { status: "success"; result: T } | { status: "error"; err: unknown };
 
@@ -26,11 +26,13 @@ const aliasesOf = ({ pathname }: Pick<URL, "pathname">): [string, ...string[]] |
 const resolveAsset = async ({
   pathname,
   getAssetFn,
-}: Pick<URL, "pathname"> & { getAssetFn: GetAssetFn }): ReturnType<GetAssetFn> => {
+}: Pick<URL, "pathname"> & { getAssetFn: GetAssetFn }): Promise<
+  { asset: Asset; resolvedPathname: string } | undefined
+> => {
   const asset = await getAssetFn(pathname);
 
   if (asset !== undefined) {
-    return asset;
+    return { asset, resolvedPathname: pathname };
   }
 
   const aliases = aliasesOf({ pathname });
@@ -39,7 +41,7 @@ const resolveAsset = async ({
     const aliasAsset = await getAssetFn(alias);
 
     if (aliasAsset !== undefined) {
-      return aliasAsset;
+      return { asset: aliasAsset, resolvedPathname: alias };
     }
   }
 
@@ -100,14 +102,16 @@ export const resolveAndFetch = async ({
     return { status: 500, body: "Internal Server Error" };
   }
 
-  const { result: asset } = assetResult;
+  const { result } = assetResult;
 
-  if (asset === undefined) {
+  if (result === undefined) {
     return { status: 404, body: "Not Found" };
   }
 
+  const { asset, resolvedPathname } = result;
+
   const compressedFilepathResult = await safeExec(() =>
-    resolveCompressedAsset({ pathname, headers, getAssetFn }),
+    resolveCompressedAsset({ pathname: resolvedPathname, headers, getAssetFn }),
   );
 
   if (compressedFilepathResult.status === "error") {
@@ -121,7 +125,7 @@ export const resolveAndFetch = async ({
     buildAssetResponse({
       asset,
       compressedAsset,
-      pathname,
+      pathname: resolvedPathname,
       method,
       ifNoneMatch: headers?.["if-none-match"],
     }),
