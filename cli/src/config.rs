@@ -48,6 +48,7 @@ pub struct AssetsConfig {
 pub struct WorkerConfig {
     pub mounts: Option<Vec<MountConfig>>,
     pub env: Option<Vec<EnvConfig>>,
+    pub network: Option<NetworkConfig>,
 }
 
 #[derive(Deserialize, Default, Clone)]
@@ -75,6 +76,16 @@ pub struct MountConfig {
 pub struct EnvConfig {
     pub key: String,
     pub value: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct NetworkConfig {
+    #[serde(default)]
+    pub ip_name_lookup: bool,
+    #[serde(default)]
+    pub tcp: bool,
+    #[serde(default)]
+    pub udp: bool,
 }
 
 impl DevConfig {

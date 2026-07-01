@@ -63,17 +63,20 @@ precompress = ["brotli", "gzip"]
 
 Controls how `kyu run` loads and serves your worker.
 
-| Field                      | Type   | Default                       | Description                                   |
-| -------------------------- | ------ | ----------------------------- | --------------------------------------------- |
-| `run.wasm`                 | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file         |
-| `run.port`                 | number | `5987`                        | Port to listen on                             |
-| `worker.mounts`            | array  | —                             | Filesystem mounts to expose to the worker     |
-| `worker.mounts[].host`     | string | —                             | Path on the host filesystem                   |
-| `worker.mounts[].guest`    | string | —                             | Path inside the worker sandbox                |
-| `worker.mounts[].writable` | bool   | `false`                       | Whether the mount is writable                 |
-| `worker.env`               | array  | —                             | Environment variables to expose to the worker |
-| `worker.env[].key`         | string | —                             | Environment variable name                     |
-| `worker.env[].value`       | string | —                             | Environment variable value                    |
+| Field                           | Type   | Default                       | Description                                                          |
+| ------------------------------- | ------ | ----------------------------- | -------------------------------------------------------------------- |
+| `run.wasm`                      | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file                                |
+| `run.port`                      | number | `5987`                        | Port to listen on                                                    |
+| `worker.mounts`                 | array  | —                             | Filesystem mounts to expose to the worker                            |
+| `worker.mounts[].host`          | string | —                             | Path on the host filesystem                                          |
+| `worker.mounts[].guest`         | string | —                             | Path inside the worker sandbox                                       |
+| `worker.mounts[].writable`      | bool   | `false`                       | Whether the mount is writable                                        |
+| `worker.env`                    | array  | —                             | Environment variables to expose to the worker                        |
+| `worker.env[].key`              | string | —                             | Environment variable name                                            |
+| `worker.env[].value`            | string | —                             | Environment variable value                                           |
+| `worker.network.ip_name_lookup` | bool   | `false`                       | Allow IP name lookup (resolving hostnames to IP addresses, e.g. DNS) |
+| `worker.network.tcp`            | bool   | `false`                       | Allow outbound TCP connections                                       |
+| `worker.network.udp`            | bool   | `false`                       | Allow outbound UDP connections                                       |
 
 ```toml
 [run]
@@ -92,6 +95,11 @@ writable = true
 [[worker.env]]
 key = "API_KEY"
 value = "secret"
+
+[worker.network]
+ip_name_lookup = true
+tcp = true
+udp = false
 ```
 
 ## Dev
