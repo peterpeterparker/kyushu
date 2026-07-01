@@ -1,4 +1,4 @@
-use crate::config::{EnvConfig, MountConfig};
+use crate::config::{EnvConfig, MountConfig, NetworkConfig};
 use crate::worker::state::WorkerState;
 use anyhow::Result;
 use wasmtime::component::ResourceTable;
@@ -55,6 +55,16 @@ impl WorkerContext {
             for env in envs {
                 self = self.with_env(&env.key, &env.value);
             }
+        }
+        self
+    }
+
+    pub fn with_network(mut self, network: Option<&NetworkConfig>) -> Self {
+        if let Some(network) = network {
+            self.wasi
+                .allow_ip_name_lookup(network.ip_name_lookup)
+                .allow_tcp(network.tcp)
+                .allow_udp(network.udp);
         }
         self
     }

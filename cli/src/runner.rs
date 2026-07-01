@@ -45,6 +45,7 @@ async fn handle_request(
             .inherit_stdio()
             .with_mounts(config.mounts.as_ref())?
             .with_envs(config.env.as_ref())
+            .with_network(config.network.as_ref())
             .build(),
     );
 

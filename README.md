@@ -235,19 +235,26 @@ writable = true
 [[worker.env]]
 key = "API_KEY"
 value = "secret"
+
+[worker.network]
+ip_name_lookup = true
+tcp = true
 ```
 
-| Field                      | Type   | Default                       | Description                                   |
-| -------------------------- | ------ | ----------------------------- | --------------------------------------------- |
-| `run.wasm`                 | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file         |
-| `run.port`                 | number | `5987`                        | Port to listen on                             |
-| `worker.mounts`            | array  | —                             | Filesystem mounts to expose to the worker     |
-| `worker.mounts[].host`     | string | —                             | Path on the host filesystem                   |
-| `worker.mounts[].guest`    | string | —                             | Path inside the worker sandbox                |
-| `worker.mounts[].writable` | bool   | `false`                       | Whether the mount is writable                 |
-| `worker.env`               | array  | —                             | Environment variables to expose to the worker |
-| `worker.env[].key`         | string | —                             | Environment variable name                     |
-| `worker.env[].value`       | string | —                             | Environment variable value                    |
+| Field                           | Type   | Default                       | Description                                                          |
+| ------------------------------- | ------ | ----------------------------- | -------------------------------------------------------------------- |
+| `run.wasm`                      | string | `worker/__kyushu_worker.wasm` | Path to the built worker `.wasm` file                                |
+| `run.port`                      | number | `5987`                        | Port to listen on                                                    |
+| `worker.mounts`                 | array  | —                             | Filesystem mounts to expose to the worker                            |
+| `worker.mounts[].host`          | string | —                             | Path on the host filesystem                                          |
+| `worker.mounts[].guest`         | string | —                             | Path inside the worker sandbox                                       |
+| `worker.mounts[].writable`      | bool   | `false`                       | Whether the mount is writable                                        |
+| `worker.env`                    | array  | —                             | Environment variables to expose to the worker                        |
+| `worker.env[].key`              | string | —                             | Environment variable name                                            |
+| `worker.env[].value`            | string | —                             | Environment variable value                                           |
+| `worker.network.ip_name_lookup` | bool   | `false`                       | Allow IP name lookup (resolving hostnames to IP addresses, e.g. DNS) |
+| `worker.network.tcp`            | bool   | `false`                       | Allow outbound TCP connections                                       |
+| `worker.network.udp`            | bool   | `false`                       | Allow outbound UDP connections                                       |
 
 ### Dev
 
@@ -309,6 +316,12 @@ const fileType = await fileTypeFromBuffer(file);
 ```
 
 **Rule of thumb:** when a package offers separate Node.js vs. browser/edge APIs, prefer the browser/edge variant.
+
+### No TLS support
+
+The `node:tls` polyfill is currently a stub and always throws `notSupported`. This means libraries relying on TLS-based protocols, such as `nodemailer` over SMTP, will fail even if `worker.network` grants TCP and DNS access. Raw TCP works, but the TLS handshake itself is not implemented in the sandbox.
+
+If you need to send email or otherwise talk to a TLS-only service, use `wasi:http` (outbound `fetch`) instead, most third-party services expose an HTTP API alongside or instead of raw protocols.
 
 ## License
 
