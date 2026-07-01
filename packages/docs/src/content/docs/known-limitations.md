@@ -34,6 +34,6 @@ const fileType = await fileTypeFromBuffer(file);
 
 ### No TLS support
 
-The `node:tls` polyfill is a stub and always throws `notSupported`. This means libraries relying on TLS-based protocols, such as `nodemailer` over SMTP, will fail even if `worker.network` grants TCP and DNS access. Raw TCP works, but the TLS handshake itself is not implemented in the sandbox.
+The `node:tls` polyfill is currently a stub and always throws `notSupported`. This means libraries relying on TLS-based protocols, such as `nodemailer` over SMTP, will fail even if `worker.network` grants TCP and DNS access. Raw TCP works, but the TLS handshake itself is not implemented in the sandbox.
 
 If you need to send email or otherwise talk to a TLS-only service, use `wasi:http` (outbound `fetch`) instead, most third-party services expose an HTTP API alongside or instead of raw protocols.

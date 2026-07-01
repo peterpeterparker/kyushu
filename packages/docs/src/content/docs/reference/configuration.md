@@ -99,7 +99,6 @@ value = "secret"
 [worker.network]
 ip_name_lookup = true
 tcp = true
-udp = false
 ```
 
 ## Dev
