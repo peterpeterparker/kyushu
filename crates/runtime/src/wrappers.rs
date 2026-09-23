@@ -1,5 +1,5 @@
 use rquickjs::function::Args;
-use rquickjs::{Ctx, FromJs, IntoJs, Object, Value};
+use rquickjs::{Array, Ctx, FromJs, IntoJs, Object, Value};
 
 pub const TAG: &str = "tag";
 pub const VALUE: &str = "val";
@@ -72,6 +72,58 @@ impl_into_args!(
     A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
 );
 
+#[allow(dead_code)]
+pub struct JsVec<T>(pub Vec<T>);
+
+impl<'js, T: IntoJs<'js>> IntoJs<'js> for JsVec<T> {
+    fn into_js(self, ctx: &Ctx<'js>) -> rquickjs::Result<Value<'js>> {
+        let mut values = Vec::with_capacity(self.0.len());
+        for item in self.0 {
+            values.push(item.into_js(ctx)?);
+        }
+
+        let raw_values = values.iter().map(Value::as_raw).collect::<Vec<_>>();
+        let array = unsafe {
+            rquickjs::qjs::JS_NewArrayFrom(
+                ctx.as_raw().as_ptr(),
+                raw_values.len() as _,
+                raw_values.as_ptr(),
+            )
+        };
+
+        // `JS_NewArrayFrom` takes ownership of every JS value (on success it stores them in
+        // the array, on the exception path it frees them all). We must therefore not let the
+        // `Value` wrappers run their `Drop` (which would call `JS_FreeValue`). However each
+        // `Value` also owns a `Ctx` clone (a `JS_DupContext`), so we still have to release that
+        // context reference manually before forgetting the value - mirroring rquickjs' own
+        // `Value::into_js_value`.
+        for value in values {
+            unsafe {
+                rquickjs::qjs::JS_FreeContext(value.ctx().as_raw().as_ptr());
+            }
+            core::mem::forget(value);
+        }
+
+        if unsafe { rquickjs::qjs::JS_IsException(array) } {
+            Err(rquickjs::Error::Exception)
+        } else {
+            Ok(unsafe { Value::from_raw(ctx.clone(), array) })
+        }
+    }
+}
+
+impl<'js, T: FromJs<'js>> FromJs<'js> for JsVec<T> {
+    fn from_js(_ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
+        let array = Array::from_value(value)?;
+        let len = array.len();
+        let mut result = Vec::with_capacity(len);
+        for idx in 0..len {
+            result.push(array.get(idx)?);
+        }
+        Ok(JsVec(result))
+    }
+}
+
 /// Wrapper for `Result` for implementing `IntoJs` and `FromJs` traits.
 ///
 /// The Result is encoded in an object with two fields:
@@ -100,7 +152,10 @@ impl<'js, Ok: IntoJs<'js>, Err: IntoJs<'js>> IntoJs<'js> for JsResult<Ok, Err> {
 impl<'js, Ok: FromJs<'js>, Err: FromJs<'js>> FromJs<'js> for JsResult<Ok, Err> {
     fn from_js(_ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
         let obj = Object::from_value(value)?;
-        let tag: String = obj.get(TAG)?;
+        // Read the tag as a JS C string (no UTF-8 validation / heap String allocation), matching
+        // the variant-conversion fast path.
+        let tag: rquickjs::String = obj.get(TAG)?;
+        let tag = tag.to_cstring()?;
         match tag.as_str() {
             RESULT_OK => {
                 let val: Ok = obj.get(VALUE)?;
@@ -110,10 +165,10 @@ impl<'js, Ok: FromJs<'js>, Err: FromJs<'js>> FromJs<'js> for JsResult<Ok, Err> {
                 let val: Err = obj.get(VALUE)?;
                 Ok(JsResult(Err(val)))
             }
-            _ => Err(rquickjs::Error::new_from_js_message(
+            other => Err(rquickjs::Error::new_from_js_message(
                 "JS result object",
                 "WIT result type",
-                format!("Unknown tag: {tag}"),
+                format!("Unknown tag: {other}"),
             )),
         }
     }

@@ -91,18 +91,18 @@ pub mod native_module {
 
 pub const WEB_CRYPTO_JS: &str = r#"
 import {
-  randomUuidV4String,
-  randomBytes,
-  randomIntRange,
-  randomizeInt8Array,
-  randomizeUint8Array,
-  randomizeUint8ClampedArray,
-  randomizeInt16Array,
-  randomizeUint16Array,
-  randomizeInt32Array,
-  randomizeUint32Array,
-  randomizeBigint64Array,
-  randomizeBiguint64Array,
+  random_uuid_v4_string,
+  random_bytes,
+  random_int_range,
+  randomize_int8_array,
+  randomize_uint8_array,
+  randomize_uint8_clamped_array,
+  randomize_int16_array,
+  randomize_uint16_array,
+  randomize_int32_array,
+  randomize_uint32_array,
+  randomize_bigint64_array,
+  randomize_biguint64_array,
 } from '__wasm_rquickjs_builtin/web_crypto_native';
 
 function getRandomValues(array) {
@@ -115,20 +115,20 @@ function getRandomValues(array) {
   if (array.byteLength > 65536) {
     throw new DOMException('The ArrayBufferView byte length exceeds the limit (65536)', 'QuotaExceededError');
   }
-  if (array instanceof Int8Array) randomizeInt8Array(array);
-  else if (array instanceof Uint8ClampedArray) randomizeUint8ClampedArray(array);
-  else if (array instanceof Uint8Array) randomizeUint8Array(array);
-  else if (array instanceof Int16Array) randomizeInt16Array(array);
-  else if (array instanceof Uint16Array) randomizeUint16Array(array);
-  else if (array instanceof Int32Array) randomizeInt32Array(array);
-  else if (array instanceof Uint32Array) randomizeUint32Array(array);
-  else if (typeof BigInt64Array !== 'undefined' && array instanceof BigInt64Array) randomizeBigint64Array(array);
-  else if (typeof BigUint64Array !== 'undefined' && array instanceof BigUint64Array) randomizeBiguint64Array(array);
+  if (array instanceof Int8Array) randomize_int8_array(array);
+  else if (array instanceof Uint8ClampedArray) randomize_uint8_clamped_array(array);
+  else if (array instanceof Uint8Array) randomize_uint8_array(array);
+  else if (array instanceof Int16Array) randomize_int16_array(array);
+  else if (array instanceof Uint16Array) randomize_uint16_array(array);
+  else if (array instanceof Int32Array) randomize_int32_array(array);
+  else if (array instanceof Uint32Array) randomize_uint32_array(array);
+  else if (typeof BigInt64Array !== 'undefined' && array instanceof BigInt64Array) randomize_bigint64_array(array);
+  else if (typeof BigUint64Array !== 'undefined' && array instanceof BigUint64Array) randomize_biguint64_array(array);
   return array;
 }
 
 function randomUUID() {
-  return randomUuidV4String();
+  return random_uuid_v4_string();
 }
 
 export { getRandomValues, randomUUID };

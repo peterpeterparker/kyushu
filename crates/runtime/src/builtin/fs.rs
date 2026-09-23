@@ -2,6 +2,22 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+// The bulk of this module performs filesystem I/O through `std::fs`, which is backed by the
+// WASI filesystem on the `wasm32-wasip2` target for both generation paths. Only the
+// `utimes`/`lutimes` family needs the host `wasi:filesystem` bindings directly (to set times on
+// a path with symlink control). The *Preview 2* bindings are used on both generation paths:
+// Preview 3 replaced `set-times-at` with an async component-model call, and driving it to
+// completion from inside a synchronous native function (which runs inside JS execution, i.e.
+// inside a poll of the exported call's wit-bindgen task) requires a nested `block_on`. That
+// nested `block_on` deadlocks: wit-bindgen's executor keeps spawned tasks in a crate-global
+// queue, so the nested `block_on` steals any task the enclosing export spawned earlier in the
+// same poll — notably the never-completing `rt.drive()` scheduler driver — and then waits for
+// it forever (wasmtime traps with "deadlock detected"). The P2 `set-times-at` is synchronous,
+// and P3 components import the residual P2 WASI surface for `std` anyway, so every P3 host
+// already provides `wasi:filesystem@0.2`.
+use wasip2::filesystem::preopens as wasi_fs_preopens;
+use wasip2::filesystem::types as wasi_fs_types;
+
 fn unix_timestamp_to_system_time(secs: f64) -> std::io::Result<SystemTime> {
     if !secs.is_finite() {
         return Err(std::io::Error::new(
@@ -31,7 +47,7 @@ fn set_file_times(file: &std::fs::File, atime_secs: f64, mtime_secs: f64) -> std
     file.set_times(times)
 }
 
-fn secs_to_wasi_timestamp(secs: f64) -> std::io::Result<wasip2::filesystem::types::NewTimestamp> {
+fn secs_to_wasi_timestamp(secs: f64) -> std::io::Result<wasi_fs_types::NewTimestamp> {
     if !secs.is_finite() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -45,7 +61,7 @@ fn secs_to_wasi_timestamp(secs: f64) -> std::io::Result<wasip2::filesystem::type
     }
     let seconds = secs.floor() as u64;
     let nanoseconds = ((secs - secs.floor()) * 1_000_000_000.0) as u32;
-    Ok(wasip2::filesystem::types::NewTimestamp::Timestamp(
+    Ok(wasi_fs_types::NewTimestamp::Timestamp(
         wasip2::clocks::wall_clock::Datetime {
             seconds,
             nanoseconds,
@@ -53,8 +69,8 @@ fn secs_to_wasi_timestamp(secs: f64) -> std::io::Result<wasip2::filesystem::type
     ))
 }
 
-fn wasi_fs_error_to_io(e: &wasip2::filesystem::types::ErrorCode) -> std::io::Error {
-    use wasip2::filesystem::types::ErrorCode;
+fn wasi_fs_error_to_io(e: &wasi_fs_types::ErrorCode) -> std::io::Error {
+    use wasi_fs_types::ErrorCode;
     match e {
         ErrorCode::NoEntry => std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()),
         ErrorCode::Access => {
@@ -82,12 +98,12 @@ fn set_path_times(
     let mtime = secs_to_wasi_timestamp(mtime_secs)?;
 
     let path_flags = if follow_symlinks {
-        wasip2::filesystem::types::PathFlags::SYMLINK_FOLLOW
+        wasi_fs_types::PathFlags::SYMLINK_FOLLOW
     } else {
-        wasip2::filesystem::types::PathFlags::empty()
+        wasi_fs_types::PathFlags::empty()
     };
 
-    let dirs = wasip2::filesystem::preopens::get_directories();
+    let dirs = wasi_fs_preopens::get_directories();
 
     // Find the best matching preopened directory (longest prefix)
     let mut best_match: Option<(usize, String)> = None;

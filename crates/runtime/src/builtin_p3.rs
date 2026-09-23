@@ -1,111 +1,175 @@
+//! Preview 3 builtin-module registry for the WASI Preview 3 (`p3`) generation path.
+//!
+//! The Preview 2 path ships the full Node.js-compatible builtin set in
+//! [`crate::builtin`](../builtin/index.html) (the `builtin/` directory). The
+//! generated `src/lib.rs` binds `mod builtin` to *this* file instead of
+//! `builtin/mod.rs` when targeting Preview 3, so P3 can promote only the builtin
+//! modules that do not require Preview 2 pollables or HTTP transport support.
+//!
+//! Phase 2 promotes the non-HTTP builtin surface. Modules still coupled to the
+//! Preview 2 transport/filesystem/socket stack are deliberately represented by
+//! unsupported stubs so `node:module` can expose a coherent builtin map without
+//! accidentally compiling or linking P2-only code into P3.
+//!
+//! ## Promoting a builtin to the Preview 3 path
+//!
+//! Later phases can enable individual builtins here *without moving any files* by
+//! declaring them with a `#[path]` attribute pointing back into `builtin/`, e.g.:
+//!
+//! ```ignore
+//! #[path = "builtin/buffer.rs"]
+//! mod buffer;
+//! ```
+//!
+//! and then adding that module's resolver/loader entries to the two functions
+//! below. Only modules that are free of P2-only dependencies (or that are made
+//! `cfg`-portable) should be promoted this way.
+
 use std::fmt::Write;
 
+#[path = "builtin/abort_controller.rs"]
 mod abort_controller;
+#[path = "builtin/assert.rs"]
 mod assert;
+#[path = "builtin/async_hooks.rs"]
 mod async_hooks;
+#[path = "builtin/base64.rs"]
 mod base64;
+#[path = "builtin/buffer.rs"]
 mod buffer;
+#[path = "builtin/child_process.rs"]
 mod child_process;
+#[path = "builtin/cluster.rs"]
 mod cluster;
+#[path = "builtin/console.rs"]
 mod console;
+#[path = "builtin/constants.rs"]
 mod constants;
+#[path = "builtin/dgram.rs"]
 mod dgram;
+#[path = "builtin/diagnostics_channel.rs"]
 mod diagnostics_channel;
+#[path = "builtin/dns.rs"]
 mod dns;
+#[path = "builtin/domain.rs"]
 mod domain;
+#[path = "builtin/encoding.rs"]
 mod encoding;
-mod formdata_node;
-mod fs;
-mod gc;
-
-#[cfg(feature = "fetch")]
-mod http;
-
-#[cfg(not(feature = "fetch"))]
-mod http_disabled;
-#[cfg(not(feature = "fetch"))]
-mod http {
-    pub use super::http_disabled::*;
-}
-
+#[path = "builtin/events.rs"]
 mod events;
+#[path = "builtin/formdata_node.rs"]
+mod formdata_node;
+#[path = "builtin/fs.rs"]
+mod fs;
+#[path = "builtin/gc.rs"]
+mod gc;
+#[path = "builtin/http_p3.rs"]
+mod http;
+#[path = "builtin/http2.rs"]
 mod http2;
+#[path = "builtin/https.rs"]
 mod https;
+#[path = "builtin/ieee754.rs"]
 mod ieee754;
+#[path = "builtin/inspector.rs"]
 mod inspector;
+#[path = "builtin/internal/mod.rs"]
 mod internal;
+#[path = "builtin/internal_binding_util.rs"]
 mod internal_binding_util;
+#[path = "builtin/intl.rs"]
 mod intl;
+#[path = "builtin/module.rs"]
 mod module;
+#[path = "builtin/net.rs"]
 mod net;
-mod socket_helpers;
-
-#[cfg(feature = "node-http")]
+#[path = "builtin/node_http_p3.rs"]
 mod node_http;
-
-#[cfg(not(feature = "node-http"))]
-mod node_http_disabled;
-#[cfg(not(feature = "node-http"))]
-mod node_http {
-    pub use super::node_http_disabled::*;
-}
-
+#[path = "builtin/node_test.rs"]
 mod node_test;
+#[path = "builtin/os.rs"]
 mod os;
+#[path = "builtin/path.rs"]
 mod path;
+#[path = "builtin/perf_hooks.rs"]
 mod perf_hooks;
+#[path = "builtin/process.rs"]
 mod process;
+#[path = "builtin/punycode.rs"]
 mod punycode;
+#[path = "builtin/querystring.rs"]
 mod querystring;
+#[path = "builtin/readline.rs"]
 mod readline;
+#[path = "builtin/repl.rs"]
 mod repl;
-mod stream;
-mod string_decoder;
-mod structured_clone;
-mod timeout;
-mod timers;
-mod tls;
-mod trace_events;
-mod tty;
-mod url;
-mod util;
-mod v8;
-mod vm;
-#[cfg(feature = "crypto")]
-mod web_crypto;
-
-#[cfg(not(feature = "crypto"))]
-mod web_crypto_lite;
-#[cfg(not(feature = "crypto"))]
-mod web_crypto {
-    pub use super::web_crypto_lite::*;
-}
-
-#[cfg(feature = "websocket")]
-mod websocket;
-mod webstreams;
-mod worker_threads;
-
-#[cfg(feature = "zlib")]
-mod zlib;
-
-#[cfg(not(feature = "zlib"))]
-mod zlib_disabled;
-#[cfg(not(feature = "zlib"))]
-mod zlib {
-    pub use super::zlib_disabled::*;
-}
-
+#[path = "builtin/socket_helpers.rs"]
+mod socket_helpers;
 #[cfg(feature = "sqlite")]
+#[path = "builtin/sqlite.rs"]
 mod sqlite;
-
 #[cfg(not(feature = "sqlite"))]
+#[path = "builtin/sqlite_disabled.rs"]
 mod sqlite_disabled;
 #[cfg(not(feature = "sqlite"))]
 mod sqlite {
     pub use super::sqlite_disabled::*;
 }
+#[path = "builtin/stream.rs"]
+mod stream;
+#[path = "builtin/string_decoder.rs"]
+mod string_decoder;
+#[path = "builtin/structured_clone.rs"]
+mod structured_clone;
+#[path = "builtin/timeout.rs"]
+mod timeout;
+#[path = "builtin/timers.rs"]
+mod timers;
+#[path = "builtin/tls.rs"]
+mod tls;
+#[path = "builtin/trace_events.rs"]
+mod trace_events;
+#[path = "builtin/tty.rs"]
+mod tty;
+#[path = "builtin/url.rs"]
+mod url;
+#[path = "builtin/util.rs"]
+mod util;
+#[path = "builtin/v8.rs"]
+mod v8;
+#[path = "builtin/vm.rs"]
+mod vm;
+#[cfg(feature = "crypto")]
+#[path = "builtin/web_crypto.rs"]
+mod web_crypto;
+#[cfg(not(feature = "crypto"))]
+#[path = "builtin/web_crypto_lite.rs"]
+mod web_crypto_lite;
+#[cfg(not(feature = "crypto"))]
+mod web_crypto {
+    pub use super::web_crypto_lite::*;
+}
+#[path = "builtin/webstreams.rs"]
+mod webstreams;
+#[path = "builtin/worker_threads.rs"]
+mod worker_threads;
+#[cfg(feature = "zlib")]
+#[path = "builtin/zlib.rs"]
+mod zlib;
+#[cfg(not(feature = "zlib"))]
+#[path = "builtin/zlib_disabled.rs"]
+mod zlib_disabled;
+#[cfg(not(feature = "zlib"))]
+mod zlib {
+    pub use super::zlib_disabled::*;
+}
+// WebSocket support via the asynchronous Preview 3 `golem:websocket@1.5.0` bindings. Opt-in
+// because it adds a required `golem:websocket` host import that not every host provides.
+#[cfg(feature = "websocket")]
+#[path = "builtin/websocket.rs"]
+mod websocket;
 
+/// Registers builtin native and JavaScript module names with the resolver.
 pub fn add_module_resolvers(
     resolver: rquickjs::loader::BuiltinResolver,
 ) -> rquickjs::loader::BuiltinResolver {
@@ -129,12 +193,6 @@ pub fn add_module_resolvers(
         .with_module("__wasm_rquickjs_builtin/intl")
         .with_module("node:util")
         .with_module("util")
-        .with_module("__wasm_rquickjs_builtin/fs_native")
-        .with_module("node:fs")
-        .with_module("fs")
-        .with_module("node:fs/promises")
-        .with_module("fs/promises")
-        .with_module("internal/fs/promises")
         .with_module("node:buffer")
         .with_module("buffer")
         .with_module("base64-js")
@@ -228,6 +286,12 @@ pub fn add_module_resolvers(
         .with_module("_http_agent")
         .with_module("node:http")
         .with_module("http")
+        .with_module("__wasm_rquickjs_builtin/fs_native")
+        .with_module("node:fs")
+        .with_module("fs")
+        .with_module("node:fs/promises")
+        .with_module("fs/promises")
+        .with_module("internal/fs/promises")
         .with_module("__wasm_rquickjs_builtin/net_native")
         .with_module("node:net")
         .with_module("net")
@@ -271,6 +335,8 @@ pub fn add_module_resolvers(
     internal::add_to_resolver(resolver)
 }
 
+/// Returns loaders for builtin native modules, builtin JavaScript modules and
+/// internal helper modules.
 pub fn module_loader() -> (
     rquickjs::loader::ModuleLoader,
     rquickjs::loader::BuiltinLoader,
@@ -302,7 +368,6 @@ pub fn module_loader() -> (
             "__wasm_rquickjs_builtin/intl_native",
             intl::js_native_module,
         )
-        .with_module("__wasm_rquickjs_builtin/fs_native", fs::js_native_module)
         .with_module("__wasm_rquickjs_builtin/os_native", os::js_native_module)
         .with_module(
             "__wasm_rquickjs_builtin/process_native",
@@ -319,26 +384,27 @@ pub fn module_loader() -> (
         )
         .with_module("__wasm_rquickjs_builtin/vm_native", vm::js_native_module)
         .with_module(
-            "__wasm_rquickjs_builtin/zlib_native",
-            zlib::js_native_module,
+            "__wasm_rquickjs_builtin/string_decoder_native",
+            string_decoder::js_native_module,
         )
+        .with_module("__wasm_rquickjs_builtin/dns_native", dns::js_native_module)
         .with_module(
             "__wasm_rquickjs_builtin/dgram_native",
             dgram::js_native_module,
         )
-        .with_module("__wasm_rquickjs_builtin/dns_native", dns::js_native_module)
+        .with_module("__wasm_rquickjs_builtin/fs_native", fs::js_native_module)
+        .with_module("__wasm_rquickjs_builtin/net_native", net::js_native_module)
         .with_module(
             "__wasm_rquickjs_builtin/node_http_native",
             node_http::js_native_module,
         )
-        .with_module("__wasm_rquickjs_builtin/net_native", net::js_native_module)
+        .with_module(
+            "__wasm_rquickjs_builtin/zlib_native",
+            zlib::js_native_module,
+        )
         .with_module(
             "__wasm_rquickjs_builtin/sqlite_native",
             sqlite::js_native_module,
-        )
-        .with_module(
-            "__wasm_rquickjs_builtin/string_decoder_native",
-            string_decoder::js_native_module,
         );
 
     #[cfg(feature = "golem")]
@@ -360,9 +426,9 @@ pub fn module_loader() -> (
         )
         .with_module("__wasm_rquickjs_builtin/console", console::CONSOLE_JS)
         .with_module("__wasm_rquickjs_builtin/timeout", timeout::TIMEOUT_JS)
+        .with_module("__wasm_rquickjs_builtin/http", http::HTTP_JS)
         .with_module("__wasm_rquickjs_builtin/http_blob", http::FETCH_BLOB_JS)
         .with_module("__wasm_rquickjs_builtin/http_form_data", http::FORMDATA_JS)
-        .with_module("__wasm_rquickjs_builtin/http", http::HTTP_JS)
         .with_module("__wasm_rquickjs_builtin/streams", webstreams::WEBSTREAMS_JS)
         .with_module(
             "__wasm_rquickjs_builtin/webstreams_wrapper",

@@ -322,32 +322,56 @@ async function streamingRequest(
             const location = nativeResponse.headers.find(h => h[0].toLowerCase() === 'location');
             if (location) {
                 const locationUrl = location[1];
-                const newUrl = new URL(locationUrl, currentUrl).toString();
-
-                // Handle method changes
-                let newMethod = currentMethod;
-                let dropBody = false;
-
-                if (status === 303) { // SEE OTHER
-                    newMethod = 'GET';
-                    dropBody = true;
-                } else if ((status === 301 /* MOVED PERMANENTLY */ || status === 302 /* FOUND */) && currentMethod === 'POST') {
-                    newMethod = 'GET';
-                    dropBody = true;
+                // A Location that does not resolve to a valid URL cannot be followed. Fall through
+                // and return this redirect response as the final visible response, matching the
+                // buffered `simpleSend` path (its native redirect resolution falls back the same
+                // way). `receiveResponse` keeps the body for an unfollowable Location.
+                let newUrl;
+                try {
+                    newUrl = new URL(locationUrl, currentUrl).toString();
+                } catch (e) {
+                    newUrl = undefined;
                 }
 
-                if (dropBody) {
-                    currentBodyCreator = null;
-                    // Remove Content headers
-                    delete currentHeaders['content-type'];
-                    delete currentHeaders['content-length'];
-                    delete currentHeaders['transfer-encoding'];
-                }
+                if (newUrl !== undefined) {
+                    // Handle method changes
+                    let newMethod = currentMethod;
+                    let dropBody = false;
 
-                currentUrl = newUrl;
-                currentMethod = newMethod;
-                currentRedirects++;
-                continue;
+                    if (status === 303) { // SEE OTHER
+                        newMethod = 'GET';
+                        dropBody = true;
+                    } else if ((status === 301 /* MOVED PERMANENTLY */ || status === 302 /* FOUND */) && currentMethod === 'POST') {
+                        newMethod = 'GET';
+                        dropBody = true;
+                    }
+
+                    if (dropBody) {
+                        currentBodyCreator = null;
+                        // Remove Content headers
+                        delete currentHeaders['content-type'];
+                        delete currentHeaders['content-length'];
+                        delete currentHeaders['transfer-encoding'];
+                    } else if (currentBodyCreator !== null) {
+                        // Body-preserving redirect (e.g. 307/308, or 301/302 for a non-POST method)
+                        // with a ReadableStream request body. Per the Fetch standard's HTTP-redirect
+                        // fetch ("If ... status is not 303, request's body is non-null, and request's
+                        // body's source is null, then return a network error"), a stream body has no
+                        // replayable source and cannot be re-sent, so the fetch must fail. Buffered
+                        // bodies (string/ArrayBuffer/Uint8Array/URLSearchParams) have a source and
+                        // are replayed by the native `simpleSend` path instead. Fail explicitly here
+                        // rather than re-invoking the single-use body creator (which would surface an
+                        // opaque "Disturbed stream" error).
+                        throw new TypeError(
+                            "Failed to fetch: a streaming request body cannot be resent across a body-preserving redirect"
+                        );
+                    }
+
+                    currentUrl = newUrl;
+                    currentMethod = newMethod;
+                    currentRedirects++;
+                    continue;
+                }
             }
         } else if (redirect === 'error' && isRedirectStatus) {
             throw new Error("Unexpected redirect");
@@ -359,7 +383,15 @@ async function streamingRequest(
         }
 
         if (redirect === 'manual' && isRedirectStatus) {
-            response.nativeResponse.makeOpaque();
+            // A manual-redirect response is an opaque-redirect filtered response (`type` =
+            // `opaqueredirect`). Preview 3's native response distinguishes this from a plain
+            // `no-cors` `opaque` response via `makeOpaqueRedirect`; the Preview 2 response only has
+            // `makeOpaque` (and reuses `redirected` for the same purpose), so fall back to it.
+            if (typeof response.nativeResponse.makeOpaqueRedirect === 'function') {
+                response.nativeResponse.makeOpaqueRedirect();
+            } else {
+                response.nativeResponse.makeOpaque();
+            }
         }
 
         return response;
@@ -504,8 +536,21 @@ export class Response {
             return 'error';
         }
         if (this._isNative) {
-            if (this.nativeResponse.isOpaque) {
-                if (this.nativeResponse.redirected) {
+            const nr = this.nativeResponse;
+            if (typeof nr.isOpaqueRedirect !== 'undefined') {
+                // Native responses that expose an explicit opaque-redirect flag (the Preview 3
+                // `HttpResponse`) distinguish `opaqueredirect` (from `redirect: "manual"`) from a
+                // `no-cors` `opaque` response directly, so `redirected` stays independently correct.
+                if (nr.isOpaqueRedirect) {
+                    return 'opaqueredirect';
+                }
+                if (nr.isOpaque) {
+                    return 'opaque';
+                }
+            } else if (nr.isOpaque) {
+                // Legacy native responses (the Preview 2 `HttpResponse`) reuse `redirected` to mark
+                // an opaque-redirect response.
+                if (nr.redirected) {
                     return 'opaqueredirect';
                 } else {
                     return 'opaque';
@@ -780,10 +825,19 @@ export class Request {
             this._url = input._url;
             this._headers = new Headers(input._headers);
             this._bodyUsed = false;
-            this._options = {
-                body: input.bytes().slice(),
-                ...input._options,
-            };
+            this._options = { ...input._options };
+            // Clone the request body. Buffered bodies (string / typed arrays / URLSearchParams /
+            // Blob / FormData) are replayable, so sharing the reference is safe and leaves the
+            // original request undisturbed. A ReadableStream body has a single reader, so it is
+            // tee'd per the Fetch standard: the original keeps one branch and the clone gets the
+            // other.
+            if (input._body instanceof ReadableStream) {
+                const [originalBranch, clonedBranch] = input._body.tee();
+                input._body = originalBranch;
+                this._body = clonedBranch;
+            } else {
+                this._body = input._body;
+            }
         } else {
             this._url = typeof input === 'string' ? input : String(input);
             this._headers = new Headers(options.headers || {});

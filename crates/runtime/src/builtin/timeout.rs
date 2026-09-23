@@ -95,10 +95,18 @@ async fn scheduled_task(
     args: Persistent<Vec<Value<'static>>>,
     timer_key: usize,
 ) {
+    #[cfg(feature = "p2")]
     let duration = wstd::time::Duration::from_millis(delay as u64);
 
+    #[cfg(feature = "p3")]
+    let duration_ns = (delay as u64).saturating_mul(1_000_000);
+
     loop {
+        #[cfg(feature = "p2")]
         wstd::task::sleep(duration).await;
+
+        #[cfg(feature = "p3")]
+        wasip3::clocks::monotonic_clock::wait_for(duration_ns).await;
 
         run_scheduled_task(ctx.clone(), code_or_fn.clone(), args.clone())
             .catch(&ctx)

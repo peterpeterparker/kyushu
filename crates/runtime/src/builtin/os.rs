@@ -47,7 +47,12 @@ pub mod native_module {
 
     #[rquickjs::function]
     pub fn uptime() -> f64 {
+        #[cfg(feature = "p2")]
         let now_ns = wasip2::clocks::monotonic_clock::now();
+
+        #[cfg(feature = "p3")]
+        let now_ns = wasip3::clocks::monotonic_clock::now();
+
         (now_ns as f64) / 1_000_000_000.0
     }
 

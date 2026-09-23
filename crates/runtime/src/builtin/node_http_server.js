@@ -322,6 +322,9 @@ ServerResponse.prototype.setHeader = function setHeader(name, value) {
         throw err;
     }
     const lower = name.toLowerCase();
+    if (lower === 'connection') {
+        this._removedConnection = false;
+    }
     this._headers[lower] = value;
     this._headerNames[lower] = name;
     return this;
@@ -343,6 +346,11 @@ ServerResponse.prototype.removeHeader = function removeHeader(name) {
     if (lower === 'date') {
         // Match Node.js behavior: removing Date disables automatic Date generation.
         this.sendDate = false;
+    } else if (lower === 'connection') {
+        // Match Node.js behavior: an explicitly removed Connection header is not
+        // re-added implicitly. The connection lifecycle is unchanged (HTTP/1.1
+        // persists, HTTP/1.0 closes after the response).
+        this._removedConnection = true;
     }
     delete this._headers[lower];
     delete this._headerNames[lower];
@@ -560,11 +568,11 @@ ServerResponse.prototype._buildHeaderString = function _buildHeaderString() {
         ? canKeepAlive
         : (canKeepAlive && userSaysKeepAlive && !userSaysClose);
 
-    if (userConnection === undefined) {
+    if (userConnection === undefined && !this._removedConnection) {
         head += 'Connection: ' + (effectiveKeepAlive ? 'keep-alive' : 'close') + '\r\n';
     }
 
-    if (effectiveKeepAlive && this.getHeader('keep-alive') === undefined) {
+    if (effectiveKeepAlive && !this._removedConnection && this.getHeader('keep-alive') === undefined) {
         const timeoutMs = typeof this._keepAliveTimeout === 'number' && this._keepAliveTimeout >= 0
             ? this._keepAliveTimeout
             : 5000;
@@ -1034,8 +1042,20 @@ function createConnectionParser(server, socket) {
             return true;
         }
 
-        // Set idle timeout for keep-alive connections
-        socket.setTimeout(server.keepAliveTimeout || 5000);
+        // Set idle timeout for keep-alive connections.
+        // Matches Node's resOnFinish: only arm an idle timeout when
+        // keepAliveTimeout is a positive finite number. A value of 0 (or
+        // invalid) disables the idle keep-alive timeout — the socket keeps
+        // whatever timeout was set while the request was active (the
+        // server.timeout reset, which is 0/disabled by default).
+        const kaTimeout = Number.isFinite(server.keepAliveTimeout) && server.keepAliveTimeout >= 0
+            ? server.keepAliveTimeout
+            : 0;
+        if (kaTimeout > 0) {
+            socket.setTimeout(kaTimeout);
+        } else {
+            socket.setTimeout(0);
+        }
         return true;
     }
 
@@ -1460,11 +1480,16 @@ function Server(options, requestListener) {
     this.on('listening', function () { _registerServer(self); });
     this.on('close', function () { _unregisterServer(self); });
     this.on('connection', function connectionListener(socket) {
-        // Force-close idle connections to prevent WASI resource exhaustion.
-        // In WASM, each socket consumes limited resources (pollables, streams),
-        // and wasi:http clients create new connections per request.
+        // Force-close idle keep-alive connections to prevent WASI resource
+        // exhaustion. In WASM, each socket consumes limited resources
+        // (pollables, streams), and wasi:http clients create new connections
+        // per request. Only connections that have already served at least one
+        // request are closed: a freshly accepted connection is also IDLE until
+        // its first request bytes arrive, and closing it here would race
+        // against the in-flight request (the client would see ECONNRESET).
         for (const conn of self._httpConnections) {
-            if (conn.state === IDLE && conn.socket && !conn.socket.destroyed) {
+            if (conn.state === IDLE && conn.requestsServed > 0 &&
+                conn.socket && !conn.socket.destroyed) {
                 // Use force_close on the native handle to immediately release
                 // WASI resources, even if async poll loops hold pollables.
                 if (conn.socket._handle && conn.socket._handle.force_close) {

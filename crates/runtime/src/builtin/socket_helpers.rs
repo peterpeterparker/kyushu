@@ -1,5 +1,10 @@
 use rquickjs::{Ctx, Exception};
+#[cfg(feature = "p2")]
 use wasip2::sockets::network::{
+    ErrorCode, IpAddress, IpSocketAddress, Ipv4SocketAddress, Ipv6SocketAddress,
+};
+#[cfg(feature = "p3")]
+use wasip3::sockets::types::{
     ErrorCode, IpAddress, IpSocketAddress, Ipv4SocketAddress, Ipv6SocketAddress,
 };
 
@@ -64,6 +69,7 @@ pub fn ip_socket_address_family(addr: &IpSocketAddress) -> &str {
     }
 }
 
+#[cfg(feature = "p2")]
 pub fn error_code_to_errno(error: ErrorCode) -> &'static str {
     match error {
         ErrorCode::AddressInUse => "EADDRINUSE",
@@ -81,6 +87,32 @@ pub fn error_code_to_errno(error: ErrorCode) -> &'static str {
         ErrorCode::NotSupported => "ENOSYS",
         ErrorCode::ConcurrencyConflict => "EALREADY",
         ErrorCode::NotInProgress => "EINVAL",
+        _ => "EIO",
+    }
+}
+
+// The Preview 3 `wasi:sockets` `error-code` enum drops several Preview 2 variants
+// (`new-socket-limit`, `concurrency-conflict`, `not-in-progress`, `would-block`) because the
+// async ABI no longer surfaces them, and adds `connection-broken`. Preview 3 `error-code` is
+// also not `Copy`, so this variant borrows the code to leave the caller's value usable for
+// diagnostics after the errno mapping.
+#[cfg(feature = "p3")]
+pub fn error_code_to_errno(error: &ErrorCode) -> &'static str {
+    match error {
+        ErrorCode::AddressInUse => "EADDRINUSE",
+        ErrorCode::AddressNotBindable => "EADDRNOTAVAIL",
+        ErrorCode::InvalidArgument => "EINVAL",
+        ErrorCode::InvalidState => "EINVAL",
+        ErrorCode::AccessDenied => "EACCES",
+        ErrorCode::RemoteUnreachable => "EHOSTUNREACH",
+        ErrorCode::ConnectionRefused => "ECONNREFUSED",
+        ErrorCode::ConnectionBroken => "EPIPE",
+        ErrorCode::DatagramTooLarge => "EMSGSIZE",
+        ErrorCode::ConnectionReset => "ECONNRESET",
+        ErrorCode::ConnectionAborted => "ECONNABORTED",
+        ErrorCode::Timeout => "ETIMEDOUT",
+        ErrorCode::NotSupported => "ENOSYS",
+        ErrorCode::OutOfMemory => "ENOMEM",
         _ => "EIO",
     }
 }

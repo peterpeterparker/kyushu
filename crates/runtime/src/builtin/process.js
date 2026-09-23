@@ -62,60 +62,126 @@ const _env = get_env();
 let _exitCode = 0;
 var _exiting = false;
 
-process.argv = _argv;
-process.argv0 = _argv[0] || '';
-process.env = new Proxy(_env, {
-    get: function(target, key) {
-        if (typeof key === 'symbol') return undefined;
-        if (key === '') return undefined;
-        return target[key];
-    },
-    set: function(target, key, value) {
-        if (typeof key === 'symbol') {
-            throw new TypeError('Cannot convert a Symbol value to a string');
+export var argv = _argv;
+Object.defineProperty(process, 'argv', {
+    get: function() { return argv; },
+    set: function(value) { argv = value; },
+    enumerable: true,
+    configurable: true,
+});
+export var argv0 = _argv[0] || '';
+Object.defineProperty(process, 'argv0', {
+    get: function() { return argv0; },
+    set: function(value) { argv0 = value; },
+    enumerable: true,
+    configurable: true,
+});
+
+function _createEnv(values) {
+    return new Proxy(values, {
+        get: function(target, key) {
+            if (typeof key === 'symbol') return undefined;
+            if (key === '') return undefined;
+            return target[key];
+        },
+        set: function(target, key, value) {
+            if (typeof key === 'symbol') {
+                throw new TypeError('Cannot convert a Symbol value to a string');
+            }
+            if (typeof value === 'symbol') {
+                throw new TypeError('Cannot convert a Symbol value to a string');
+            }
+            if (key === '') return true;
+            target[key] = String(value);
+            return true;
+        },
+        deleteProperty: function(target, key) {
+            if (typeof key === 'symbol') return true;
+            delete target[key];
+            return true;
+        },
+        has: function(target, key) {
+            if (typeof key === 'symbol') return false;
+            return Object.prototype.hasOwnProperty.call(target, key);
+        },
+        ownKeys: function(target) {
+            return Object.keys(target);
+        },
+        getOwnPropertyDescriptor: function(target, key) {
+            if (typeof key === 'symbol') return undefined;
+            if (Object.prototype.hasOwnProperty.call(target, key)) {
+                return { value: target[key], writable: true, enumerable: true, configurable: true };
+            }
+            return undefined;
+        },
+        defineProperty: function(target, key, descriptor) {
+            if ('get' in descriptor || 'set' in descriptor) {
+                const err = new TypeError("'process.env' does not accept an accessor(getter/setter) descriptor");
+                err.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
+                throw err;
+            }
+            if (descriptor.configurable !== true || descriptor.writable !== true || descriptor.enumerable !== true) {
+                const err = new TypeError("'process.env' only accepts a configurable, writable, and enumerable data descriptor");
+                err.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
+                throw err;
+            }
+            if (descriptor.value !== undefined) {
+                target[key] = String(descriptor.value);
+            }
+            return true;
         }
-        if (typeof value === 'symbol') {
-            throw new TypeError('Cannot convert a Symbol value to a string');
+    });
+}
+
+export var env = _createEnv(_env);
+Object.defineProperty(process, 'env', {
+    get: function() { return env; },
+    set: function(value) { env = value; },
+    enumerable: true,
+    configurable: true,
+});
+
+Object.defineProperty(process, Symbol.for('__wasm_rquickjs_refresh_process_state'), {
+    value: function(nextArgv, nextEnv) {
+        let argvRefreshed = false;
+        const currentArgv = argv;
+        if (Array.isArray(currentArgv)) {
+            try {
+                currentArgv.length = 0;
+                for (const value of nextArgv) currentArgv.push(value);
+                argvRefreshed = currentArgv.length === nextArgv.length
+                    && currentArgv.every((value, index) => value === nextArgv[index]);
+            } catch (_) {
+                argvRefreshed = false;
+            }
         }
-        if (key === '') return true;
-        target[key] = String(value);
-        return true;
-    },
-    deleteProperty: function(target, key) {
-        if (typeof key === 'symbol') return true;
-        delete target[key];
-        return true;
-    },
-    has: function(target, key) {
-        if (typeof key === 'symbol') return false;
-        return Object.prototype.hasOwnProperty.call(target, key);
-    },
-    ownKeys: function(target) {
-        return Object.keys(target);
-    },
-    getOwnPropertyDescriptor: function(target, key) {
-        if (typeof key === 'symbol') return undefined;
-        if (Object.prototype.hasOwnProperty.call(target, key)) {
-            return { value: target[key], writable: true, enumerable: true, configurable: true };
+        if (!argvRefreshed) argv = nextArgv;
+        argv0 = nextArgv[0] || '';
+
+        const currentEnv = env;
+        const wasExtensible = Object.isExtensible(currentEnv);
+        let envRefreshed = true;
+        try {
+            for (const key of Object.keys(currentEnv)) delete currentEnv[key];
+            for (const [key, value] of Object.entries(nextEnv)) currentEnv[key] = value;
+            const keys = Object.keys(nextEnv);
+            envRefreshed = Object.keys(currentEnv).length === keys.length
+                && keys.every((key) => currentEnv[key] === nextEnv[key]);
+        } catch (_) {
+            envRefreshed = false;
         }
-        return undefined;
+        if (!envRefreshed) {
+            env = _createEnv(nextEnv);
+            if (!wasExtensible) Object.preventExtensions(env);
+        }
+
+        return process.argv === argv
+            && process.argv0 === argv0
+            && process.env === env;
     },
-    defineProperty: function(target, key, descriptor) {
-        if ('get' in descriptor || 'set' in descriptor) {
-            const err = new TypeError("'process.env' does not accept an accessor(getter/setter) descriptor");
-            err.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
-            throw err;
-        }
-        if (descriptor.configurable !== true || descriptor.writable !== true || descriptor.enumerable !== true) {
-            const err = new TypeError("'process.env' only accepts a configurable, writable, and enumerable data descriptor");
-            err.code = 'ERR_INVALID_OBJECT_DEFINE_PROPERTY';
-            throw err;
-        }
-        if (descriptor.value !== undefined) {
-            target[key] = String(descriptor.value);
-        }
-        return true;
-    }
+    writable: false,
+    enumerable: false,
+    configurable: false,
 });
 process.exitCode = _exitCode;
 process.domain = null;
@@ -741,9 +807,6 @@ globalThis.__wasm_rquickjs_rejection_tracker = function(promise, reason, isHandl
 };
 
 // Named exports for import { argv } from 'node:process' style
-export var argv = process.argv;
-export var argv0 = process.argv0;
-export var env = process.env;
 export var stdout = process.stdout;
 export var stderr = process.stderr;
 export function cwd() { return process.cwd(); }

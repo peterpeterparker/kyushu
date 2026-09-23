@@ -1,8 +1,6 @@
-#![allow(warnings)]
-
 // Empty file, to be generated
 
-pub mod builtin;
+mod builtin;
 pub mod internal;
 mod modules;
 pub mod wrappers;
