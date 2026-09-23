@@ -3,7 +3,7 @@ use crate::runtime as worker_runtime;
 
 const WORKER_BUNDLE: &str = include_str!("../../packages/worker/dist/index.mjs");
 
-pub fn initialize() {
+pub async fn initialize() {
     // Load static assets from the filesystem into memory before wizer_initialize()
     // so they are frozen into the Wasm snapshot and available at runtime without IO.
     //
@@ -22,5 +22,5 @@ pub fn initialize() {
     kyushu_runtime::add_additional_module("@kyushu/app", Box::new(move || bundle.clone()));
 
     // Must be called after registering modules and before the first request is served.
-    kyushu_runtime::internal::run_sync(kyushu_runtime::internal::wizer_initialize());
+    kyushu_runtime::internal::wizer_initialize().await;
 }
