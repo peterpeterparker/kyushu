@@ -317,8 +317,11 @@ impl OwnedJsRuntime {
     /// Install the ordinary Node-compatible global environment without loading
     /// the generated component entry module or any generated WIT bridge state.
     pub(crate) async fn initialize_node_builtins(&self) -> Result<(), String> {
-        initialize_dispose_symbols(&self.ctx).await?;
-        self.rt.idle().await;
+        // Dispose symbols must be initialized before builtins, since builtin
+        // modules use [Symbol.dispose] in their class definitions.
+        // In latest version of rquickjs Symbol.dispose are supported
+        // initialize_dispose_symbols(&self.ctx).await?;
+        // self.rt.idle().await;
         initialize_builtin_wiring(&self.ctx).await?;
         self.rt.idle().await;
         Ok(())
