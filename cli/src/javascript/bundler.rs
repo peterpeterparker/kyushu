@@ -14,13 +14,22 @@ pub async fn bundle(src: &str) -> Result<String> {
         format: Some(OutputFormat::Esm),
         minify: Some(RawMinifyOptions::Bool(true)),
         // import.meta.url must be defined or the createRequire polyfill throws. rolldown's define
-        // option  is buggy and does not handle this meta-property, so we have to inject it via a banner instead.
+        // option is buggy and does not handle this meta-property, so we have to inject it via a banner instead.
         banner: Some(AddonOutputOption::String(Some(
             "Object.defineProperty(import.meta, 'url', { value: 'file:///virtual/kyushu-pseudo-module.js' });".to_string()
         ))),
+        // Since wasm-rquickjs v0.4.1, the runtime follows Node's ES module semantics and prepends
+        // `var require;` to ES modules that do not declare `require` themselves (see `inject_module_source_prologue` in
+        // the skeleton's module_loading.rs), which shadows globalThis.require. Re-declaring it here restores access
+        // to the polyfill's require for @kyushu/app.
+        // It must be a post banner: a regular banner is minified, and the declaration, being unused from
+        // the minifier's point of view, gets dropped.
+        post_banner: Some(AddonOutputOption::String(Some(
+            "var require = globalThis.require;".to_string(),
+        ))),
         ..Default::default()
     })
-    .map_err(|e| anyhow!("Failed to create bundler: {:?}", e))?;
+        .map_err(|e| anyhow!("Failed to create bundler: {:?}", e))?;
 
     let output = bundler
         .generate()
@@ -69,7 +78,7 @@ mod tests {
         assert!(result.is_ok());
 
         let code = result.unwrap();
-        let expected_code = "Object.defineProperty(import.meta,\"url\",{value:`file:///virtual/kyushu-pseudo-module.js`});var e={async fetch(e){return{status:200,body:`hello world`,headers:{\"content-type\":`text/plain`}}}};export{e as default};";
+        let expected_code = "var require = globalThis.require;\nObject.defineProperty(import.meta,\"url\",{value:`file:///virtual/kyushu-pseudo-module.js`});var e={async fetch(e){return{status:200,body:`hello world`,headers:{\"content-type\":`text/plain`}}}};export{e as default};";
         assert_eq!(code.trim(), expected_code);
     }
 
