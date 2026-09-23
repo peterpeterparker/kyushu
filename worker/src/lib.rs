@@ -19,12 +19,12 @@ use bindings::wasi::http::types::{ErrorCode, Request, Response};
 struct Worker;
 
 impl bindings::Guest for Worker {
-    fn wizer_initialize() {
-        setup::initialize();
+    async fn wizer_initialize() {
+        setup::initialize().await;
     }
 
-    fn kyu_initialize() {
-        setup::initialize();
+    async fn kyu_initialize() {
+        setup::initialize().await;
     }
 
     fn kyu_version() -> String {
