@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 mod abort_controller;
+mod abort_signal;
 mod assert;
 mod async_hooks;
 mod base64;
@@ -14,6 +15,7 @@ mod diagnostics_channel;
 mod dns;
 mod domain;
 mod encoding;
+pub(crate) mod execution;
 mod formdata_node;
 mod fs;
 mod gc;
@@ -67,6 +69,7 @@ mod timers;
 mod tls;
 mod trace_events;
 mod tty;
+mod typescript;
 mod url;
 mod util;
 mod v8;
@@ -81,7 +84,7 @@ mod web_crypto {
     pub use super::web_crypto_lite::*;
 }
 
-#[cfg(feature = "golem")]
+#[cfg(feature = "websocket")]
 mod websocket;
 mod webstreams;
 mod worker_threads;
@@ -106,6 +109,20 @@ mod sqlite {
     pub use super::sqlite_disabled::*;
 }
 
+pub(crate) fn realpath_for_module_resolution(
+    ctx: &rquickjs::Ctx<'_>,
+    path: &str,
+) -> Option<String> {
+    fs::realpath_for_module_resolution(ctx, path)
+}
+
+pub(crate) fn realpath_for_module_resolution_with_symlinks(
+    emulated_symlinks: &std::collections::HashMap<String, String>,
+    path: &str,
+) -> Option<String> {
+    fs::realpath_for_module_resolution_with_symlinks(emulated_symlinks, path)
+}
+
 pub fn add_module_resolvers(
     resolver: rquickjs::loader::BuiltinResolver,
 ) -> rquickjs::loader::BuiltinResolver {
@@ -128,7 +145,9 @@ pub fn add_module_resolvers(
         .with_module("__wasm_rquickjs_builtin/intl_native")
         .with_module("__wasm_rquickjs_builtin/intl")
         .with_module("node:util")
+        .with_module("node:util/types")
         .with_module("util")
+        .with_module("util/types")
         .with_module("__wasm_rquickjs_builtin/fs_native")
         .with_module("node:fs")
         .with_module("fs")
@@ -258,10 +277,18 @@ pub fn add_module_resolvers(
         .with_module("__wasm_rquickjs_builtin/sqlite_native")
         .with_module("node:sqlite");
 
+    let resolver = resolver
+        .with_module("__wasm_rquickjs_builtin/execution_native")
+        .with_module("wasm-rquickjs:execution")
+        .with_module("__wasm_rquickjs_builtin/typescript_native");
+
     #[cfg(feature = "golem")]
     let resolver = resolver
         .with_module("__wasm_rquickjs_builtin/diagnostics_channel_native")
-        .with_module("__wasm_rquickjs_builtin/diagnostics_channel_golem")
+        .with_module("__wasm_rquickjs_builtin/diagnostics_channel_golem");
+
+    #[cfg(feature = "websocket")]
+    let resolver = resolver
         .with_module("__wasm_rquickjs_builtin/websocket_native")
         .with_module("__wasm_rquickjs_builtin/websocket");
 
@@ -338,16 +365,26 @@ pub fn module_loader() -> (
             string_decoder::js_native_module,
         );
 
+    let native_loader = native_loader.with_module(
+        "__wasm_rquickjs_builtin/execution_native",
+        execution::js_native_module,
+    );
+    let native_loader = native_loader.with_module(
+        "__wasm_rquickjs_builtin/typescript_native",
+        typescript::js_native_module,
+    );
+
     #[cfg(feature = "golem")]
-    let native_loader = native_loader
-        .with_module(
-            "__wasm_rquickjs_builtin/diagnostics_channel_native",
-            diagnostics_channel::js_native_module,
-        )
-        .with_module(
-            "__wasm_rquickjs_builtin/websocket_native",
-            websocket::js_native_module,
-        );
+    let native_loader = native_loader.with_module(
+        "__wasm_rquickjs_builtin/diagnostics_channel_native",
+        diagnostics_channel::js_native_module,
+    );
+
+    #[cfg(feature = "websocket")]
+    let native_loader = native_loader.with_module(
+        "__wasm_rquickjs_builtin/websocket_native",
+        websocket::js_native_module,
+    );
 
     let builtin_loader = rquickjs::loader::BuiltinLoader::default()
         .with_module(
@@ -371,7 +408,9 @@ pub fn module_loader() -> (
         .with_module("__wasm_rquickjs_builtin/encoding", encoding::ENCODING_JS)
         .with_module("__wasm_rquickjs_builtin/intl", intl::INTL_JS)
         .with_module("node:util", util::UTIL_JS)
-        .with_module("util", util::REEXPORT_JS)
+        .with_module("node:util/types", util::UTIL_TYPES_JS)
+        .with_module("util", util::BARE_UTIL_REEXPORT_JS)
+        .with_module("util/types", util::UTIL_TYPES_JS)
         .with_module("base64-js", base64::BASE64_JS)
         .with_module("ieee754", ieee754::IEEE754_JS)
         .with_module("node:buffer", buffer::BUFFER_JS)
@@ -495,13 +534,18 @@ pub fn module_loader() -> (
         .with_module("zlib", zlib::REEXPORT_JS)
         .with_module("node:sqlite", sqlite::SQLITE_JS);
 
+    let builtin_loader =
+        builtin_loader.with_module("wasm-rquickjs:execution", execution::EXECUTION_JS);
+
     #[cfg(feature = "golem")]
-    let builtin_loader = builtin_loader
-        .with_module(
-            "__wasm_rquickjs_builtin/diagnostics_channel_golem",
-            diagnostics_channel::DIAGNOSTICS_CHANNEL_GOLEM_JS,
-        )
-        .with_module("__wasm_rquickjs_builtin/websocket", websocket::WEBSOCKET_JS);
+    let builtin_loader = builtin_loader.with_module(
+        "__wasm_rquickjs_builtin/diagnostics_channel_golem",
+        diagnostics_channel::DIAGNOSTICS_CHANNEL_GOLEM_JS,
+    );
+
+    #[cfg(feature = "websocket")]
+    let builtin_loader =
+        builtin_loader.with_module("__wasm_rquickjs_builtin/websocket", websocket::WEBSOCKET_JS);
 
     (native_loader, builtin_loader, internal::module_loader())
 }
@@ -527,118 +571,24 @@ pub fn wire_builtins() -> String {
     writeln!(result, "{}", worker_threads::WIRE_JS).unwrap();
     writeln!(result, "globalThis.global = globalThis;").unwrap();
     writeln!(result, "globalThis.self = globalThis;").unwrap();
-    writeln!(result, "{}", IMPORT_META_RESOLVE_JS).unwrap();
-    writeln!(result, "{}", IMPORT_ATTRS_VALIDATE_JS).unwrap();
+    writeln!(
+        result,
+        "{}",
+        crate::internal::module_loading::IMPORT_META_RESOLVE_JS
+    )
+    .unwrap();
+    writeln!(
+        result,
+        "{}",
+        crate::internal::module_loading::IMPORT_ATTRS_VALIDATE_JS
+    )
+    .unwrap();
 
     #[cfg(feature = "golem")]
     writeln!(result, "{}", diagnostics_channel::GOLEM_WIRE_JS).unwrap();
 
-    #[cfg(feature = "golem")]
+    #[cfg(feature = "websocket")]
     writeln!(result, "{}", websocket::WIRE_JS).unwrap();
 
     result
 }
-
-const IMPORT_META_RESOLVE_JS: &str = r#"globalThis.__wasm_rquickjs_import_meta_resolve = function(baseUrl, specifier) {
-  if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//.test(specifier) || specifier.startsWith('data:')) return specifier;
-  if (specifier.startsWith('node:')) return specifier;
-  var NODE_BUILTINS = new Set(['fs','path','os','crypto','http','https','url','util','stream','events','buffer','querystring','string_decoder','zlib','assert','module','net','tls','child_process','timers','dns','dgram','cluster','constants','readline','tty','v8','vm','worker_threads','perf_hooks','async_hooks','diagnostics_channel','trace_events','inspector','punycode','console','process','test','sqlite','domain','http2','repl']);
-  function normalizePath(p) {
-    var parts = p.split('/'); var out = [];
-    for (var i = 0; i < parts.length; i++) {
-      if (!parts[i] || parts[i] === '.') continue;
-      if (parts[i] === '..') { if (out.length > 0) out.pop(); }
-      else out.push(parts[i]);
-    }
-    return '/' + out.join('/');
-  }
-  if (specifier.startsWith('/')) {
-    var path = normalizePath(specifier);
-    return baseUrl.startsWith('file://') ? 'file://' + path : path;
-  }
-  if (specifier.startsWith('.')) {
-    var base = baseUrl;
-    if (base.startsWith('file://')) base = base.slice(7);
-    var dir = base.substring(0, base.lastIndexOf('/') + 1);
-    var path = normalizePath(dir + specifier);
-    return baseUrl.startsWith('file://') ? 'file://' + path : path;
-  }
-  if (NODE_BUILTINS.has(specifier)) return 'node:' + specifier;
-  throw new Error('Cannot resolve bare specifier "' + specifier + '" from "' + baseUrl + '"');
-};"#;
-
-const IMPORT_ATTRS_VALIDATE_JS: &str = r#"
-globalThis.__wasm_rquickjs_validate_import_attrs = function(specifier, options) {
-  var attrs = null;
-  if (options != null && typeof options === 'object') {
-    var w = options['with'];
-    if (w != null && typeof w === 'object') {
-      attrs = w;
-    }
-  }
-
-  var format = null;
-  if (typeof specifier === 'string') {
-    if (specifier.startsWith('data:')) {
-      var rest = specifier.substring(5);
-      var ci = rest.indexOf(',');
-      if (ci >= 0) {
-        var meta = rest.substring(0, ci).split(';')[0].trim();
-        if (meta === 'application/json') format = 'json';
-        else if (meta === 'text/javascript' || meta === 'application/javascript') format = 'module';
-        else if (meta === 'text/css') format = 'css';
-      }
-    } else if (specifier.endsWith('.json')) {
-      format = 'json';
-    } else if (specifier.endsWith('.js') || specifier.endsWith('.mjs') || specifier.endsWith('.cjs')) {
-      format = 'module';
-    }
-  }
-
-  if (attrs) {
-    var typeValue;
-    var keys = Object.keys(attrs);
-    for (var k = 0; k < keys.length; k++) {
-      if (keys[k] === 'type') typeValue = attrs.type;
-    }
-    if (typeValue !== undefined) {
-      if (typeValue === 'json') {
-        if (format === 'module') {
-          return Promise.reject(Object.assign(
-            new TypeError('Cannot use import attributes to change the type of a JavaScript module'),
-            { code: 'ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE' }
-          ));
-        }
-      } else if (typeValue !== 'css') {
-        return Promise.reject(Object.assign(
-          new TypeError('Import attribute type "' + typeValue + '" is not supported'),
-          { code: 'ERR_IMPORT_ATTRIBUTE_UNSUPPORTED' }
-        ));
-      }
-    }
-  }
-
-  if (format === 'json') {
-    if (!attrs || attrs.type !== 'json') {
-      return Promise.reject(Object.assign(
-        new TypeError('Module "' + specifier + '" needs an import attribute of "type: json"'),
-        { code: 'ERR_IMPORT_ATTRIBUTE_MISSING' }
-      ));
-    }
-  }
-
-  if (attrs) {
-    var keys2 = Object.keys(attrs);
-    for (var j = 0; j < keys2.length; j++) {
-      if (keys2[j] !== 'type') {
-        return Promise.reject(Object.assign(
-          new TypeError('Import attribute "' + keys2[j] + '" is not supported'),
-          { code: 'ERR_IMPORT_ATTRIBUTE_UNSUPPORTED' }
-        ));
-      }
-    }
-  }
-
-  return false;
-};
-"#;

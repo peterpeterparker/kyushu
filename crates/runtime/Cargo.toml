@@ -12,17 +12,44 @@ edition = "2024"
 path = "src/lib.rs"
 
 [features]
-default = ["normal"]
+default = ["p2", "normal"]
 
-# Tier meta-features (cumulative)
-lite = ["fetch"]
+# WASI generation target (mutually exclusive; select exactly one). `p2` is the historical
+# Preview 2 path (synchronous exports, full Node.js builtins, wstd/wasip2, Wizer). `p3` is the
+# opt-in Preview 3 async path (async exports/imports, minimal runtime spine, wasip3, no wstd).
+# These are selected by the code generator, which rewrites `default` to
+# `["p3", "normal-p3"]` for the Preview 3 target.
+p2 = ["dep:wit-bindgen", "dep:wit-bindgen-rt", "dep:wasip2", "dep:wstd", "golem-websocket?/p2"]
+# `wasip2` is also needed on the P3 path: the `utimes` family in `builtin/fs.rs` uses the
+# synchronous Preview 2 `set-times-at` on both paths, because P3's async `set-times-at` would
+# require a nested `block_on` inside JS execution, which deadlocks the wit-bindgen executor
+# (the nested `block_on` steals the enclosing export's spawned tasks, e.g. the never-completing
+# `rt.drive()` scheduler driver). P3 components import the residual P2 WASI surface for `std`
+# anyway, so this adds no new host requirements.
+p3 = ["dep:wit-bindgen-p3", "dep:wasip3", "dep:wasip2", "dep:http", "golem-websocket?/p3"]
+internal-test-execution = ["test-observability"]
+
+# Tier meta-features (cumulative). All Preview 2 tiers, since the Node.js builtin set they
+# enable is only compiled in the `p2` path.
+lite = ["p2", "fetch"]
 normal = ["lite", "node-http", "crypto", "zlib", "logging", "encoding"]
 full = ["normal", "crypto-full", "brotli", "sqlite", "timezone"]
 full-no-logging = ["lite", "node-http", "crypto", "zlib", "encoding", "crypto-full", "brotli", "sqlite", "timezone"]
 
-# Individual capabilities
-fetch = ["dep:golem-wasi-http"]
-node-http = []
+# Preview 3 tier meta-features (cumulative). These mirror the Preview 2 tiers exactly, except
+# for `fetch`/`node-http`: those features are the Preview 2 HTTP implementations, and the `p3`
+# path ships its own `wasi:http@0.3` based fetch and node:http unconditionally. Every other
+# capability (`crypto`, `zlib`, `logging`, `encoding`, `crypto-full`, `brotli`, `sqlite`,
+# `timezone`, `websocket`, `golem`) is target-agnostic and means the same thing on both targets.
+# The code generator sets the generated crate's default to `["p3", "normal-p3"]` for the
+# Preview 3 target, mirroring the Preview 2 default of `["p2", "normal"]`.
+normal-p3 = ["p3", "crypto", "zlib", "logging", "encoding"]
+full-p3 = ["normal-p3", "crypto-full", "brotli", "sqlite", "timezone"]
+full-no-logging-p3 = ["p3", "crypto", "zlib", "encoding", "crypto-full", "brotli", "sqlite", "timezone"]
+
+# Individual capabilities (Preview 2 only)
+fetch = ["p2", "dep:golem-wasi-http"]
+node-http = ["p2"]
 
 logging = ["dep:wasi-logging"]
 encoding = ["dep:encoding_rs"]
@@ -51,7 +78,29 @@ crypto-full = [
 
 sqlite = ["dep:rusqlite"]
 timezone = ["dep:chrono-tz"]
-golem = ["dep:golem-context", "dep:golem-websocket"]
+
+# TypeScript
+typescript-runtime = [
+    "dep:swc_common",
+    "dep:swc_ecma_ast",
+    "dep:swc_ecma_parser",
+    "dep:swc_ecma_visit",
+    "dep:swc_ts_fast_strip",
+]
+typescript-transform-runtime = ["typescript-runtime"]
+# Private test instrumentation. Individual test combinations opt into the
+# capabilities they observe; this umbrella is excluded from every runtime tier.
+test-observability = []
+typescript-compiler-profiling = ["typescript-transform-runtime", "test-observability"]
+
+# WebSocket support via the target-specific `golem:websocket@1.5.0` bindings.
+websocket = ["dep:golem-websocket"]
+
+# Golem bundle: WebSocket + Golem context/diagnostics integration. Target-agnostic: the
+# `golem-context` crate only imports the fully synchronous `golem:api/context@1.5.0` interface
+# (plus the `wasi:clocks/wall-clock@0.2.3` datetime type, which Preview 3 hosts also provide),
+# so it works on both the Preview 2 and Preview 3 paths.
+golem = ["dep:golem-context", "websocket"]
 
 [dependencies]
 # Core dependencies
@@ -94,6 +143,9 @@ ecdsa = { version = "0.16", default-features = false, features = ["signing", "ve
 signature = { version = "2", optional = true }
 futures = { version = "0.3.31", features = [] }
 futures-concurrency = "7.6.3"
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4"] }
 rand = "0.9.2"
@@ -103,13 +155,38 @@ base64ct = { version = "1", features = ["alloc"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
 brotli = { version = "7", default-features = false, features = ["std"], optional = true }
 crc32fast = { version = "1", optional = true }
-wasip2 = "1.0"
-wit-bindgen-rt = { version = "0.42.1", features = ["bitflags"] }
-wit-bindgen = { version = "0.42.1", default-features = false, features = ["macros"] }
-wstd = { workspace = true }
+# WASI Preview 2 host bindings + sync runtime (enabled by the `p2` feature).
+wasip2 = { version = "1.0", optional = true }
+wit-bindgen-rt = { version = "0.42.1", features = ["bitflags"], optional = true }
+wit-bindgen = { version = "0.42.1", default-features = false, features = ["macros"], optional = true }
+wstd = { version = "=0.6.5", optional = true }
+
+# WASI Preview 3 host bindings + async wit-bindgen (enabled by the `p3` feature).
+# `wit-bindgen-p3` is the same `wit-bindgen` crate renamed so the 0.58 (async) and the
+# Preview 2 0.42 versions can coexist in this single skeleton; the generated Preview 3
+# bindings use `runtime_path: "wit_bindgen_p3::rt"`. Pinned to the `wasi-0.3.0` snapshot
+# matching Wasmtime 46.
+wasip3 = { version = "=0.7.0", optional = true }
+wit-bindgen-p3 = { package = "wit-bindgen", version = "0.58.0", default-features = false, features = ["async", "async-spawn", "macros", "inter-task-wakeup"], optional = true }
+# Pure-Rust HTTP primitives used by the Preview 3 `fetch`/HTTP bridge (`builtin/http_p3.rs`) to
+# validate header names/values, HTTP versions, and to resolve canonical status reason phrases.
+# This matches the validation the Preview 2 path gets from `golem-wasi-http` (which re-exports the
+# same `http` crate) without depending on `golem-wasi-http` itself.
+http = { version = "1", optional = true }
+
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 chrono-tz = { version = "0.10", default-features = false, optional = true }
 unicode-segmentation = "1.12"
+
+# TypeScript
+swc_common = { version = "24.0.0", optional = true }
+# Direct dependencies for TypeScript-aware module-format classification. These
+# are also transitive dependencies of swc_ts_fast_strip, but this crate imports
+# their public APIs directly and must not rely on transitive visibility.
+swc_ecma_ast = { version = "27.0.0", optional = true }
+swc_ecma_parser = { version = "43.0.0", default-features = false, features = ["typescript"], optional = true }
+swc_ecma_visit = { version = "27.0.0", optional = true }
+swc_ts_fast_strip = { version = "56.0.0", optional = true }
 
 # HTTP
 golem-wasi-http = { version = "0.2.0", features = ["async"], optional = true }
@@ -122,7 +199,7 @@ rusqlite = { version = "0.38", default-features = false, features = ["bundled", 
 
 # Golem
 golem-context = { version = "0.0.1", optional = true }
-golem-websocket = { version = "0.0.2", optional = true }
+golem-websocket = { version = "0.0.3", default-features = false, optional = true }
 
 # Moved to workspace to avoid Cargo warnings
 # Patch rusqlite and libsqlite3-sys together for wasm32-wasi: the fork carries

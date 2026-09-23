@@ -22,6 +22,8 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use wstd::runtime::AsyncPollable;
 
+use super::abort_signal::with_abort_signal;
+
 /// Request mode - defines the cross-origin behavior
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rquickjs::class::Trace, rquickjs::JsLifetime)]
 pub enum RequestMode {
@@ -458,23 +460,37 @@ impl HttpRequest {
         }
     }
 
-    pub async fn receive_response<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<HttpResponse> {
-        if let Some(execution) = self.execution.take() {
-            let response = execution
-                .receive_response()
-                .await
-                .map_err(|_| Exception::throw_message(&ctx, "Failed to receive HTTP response"))?;
-
-            Ok(HttpResponse::from_response(response))
-        } else {
-            Err(Exception::throw_message(
+    pub async fn receive_response<'js>(
+        &mut self,
+        ctx: Ctx<'js>,
+        signal: Option<Value<'js>>,
+    ) -> rquickjs::Result<HttpResponse> {
+        let Some(execution) = self.execution.take() else {
+            return Err(Exception::throw_message(
                 &ctx,
                 "HTTP request has not been initialized for sending",
-            ))
-        }
+            ));
+        };
+        let inner_ctx = ctx.clone();
+        with_abort_signal(&ctx, signal, async move {
+            let response = execution.receive_response().await.map_err(|_| {
+                Exception::throw_message(&inner_ctx, "Failed to receive HTTP response")
+            })?;
+            Ok(HttpResponse::from_response(response))
+        })
+        .await
     }
 
-    pub async fn simple_send<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<HttpResponse> {
+    pub async fn simple_send<'js>(
+        &mut self,
+        ctx: Ctx<'js>,
+        signal: Option<Value<'js>>,
+    ) -> rquickjs::Result<HttpResponse> {
+        let send = self.simple_send_inner(ctx.clone());
+        with_abort_signal(&ctx, signal, send).await
+    }
+
+    async fn simple_send_inner<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<HttpResponse> {
         // Validate mode constraints
         if self.mode == RequestMode::NoCors {
             let method_str = self.method.to_string().to_uppercase();
@@ -667,6 +683,10 @@ impl WrappedRequestBodyWriter {
             ))
         }
     }
+
+    pub fn abort_body(&mut self) {
+        self.writer = None;
+    }
 }
 
 #[derive(Trace, JsLifetime)]
@@ -730,6 +750,10 @@ impl HttpResponse {
         // For opaque responses, clear headers and set status to 0
         self.headers.clear();
         self.status = golem_wasi_http::StatusCode::OK; // Will report as 0 when is_opaque is true
+    }
+
+    pub fn discard_body(&mut self) {
+        self.body_source = ResponseBodySource::Consumed;
     }
 
     #[qjs(get)]

@@ -30,3 +30,4 @@ inherits = "release"
 [patch.crates-io]
 rusqlite = { git = "https://github.com/golemcloud/rusqlite", branch = "v0.38.0-patched" }
 libsqlite3-sys = { git = "https://github.com/golemcloud/rusqlite", branch = "v0.38.0-patched" }
+golem-websocket = { git = "https://github.com/golemcloud/wasm-rquickjs", branch = "wasi-p3" }

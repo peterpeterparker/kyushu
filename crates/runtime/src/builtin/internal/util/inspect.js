@@ -1926,7 +1926,7 @@ function colorizeStackTrace(ctx, stack) {
     let out = lines[0];
     for (let i = 1; i < lines.length; i++) {
         let line = lines[i];
-        if (/\(node-compat-runner:\d+:\d+\)$/.test(line)) {
+        if (/^ {4}at .* \(native\)$/.test(line)) {
             out += `\n${ctx.stylize(line, "undefined")}`;
             continue;
         }

@@ -1,8 +1,18 @@
 use rquickjs::{Ctx, Exception};
+
+#[cfg(feature = "p2")]
 use wasip2::sockets::instance_network::instance_network;
+#[cfg(feature = "p2")]
 use wasip2::sockets::ip_name_lookup::{ResolveAddressStream, resolve_addresses};
+#[cfg(feature = "p2")]
 use wasip2::sockets::network::{ErrorCode, IpAddress};
+#[cfg(feature = "p2")]
 use wstd::runtime::AsyncPollable;
+
+#[cfg(feature = "p3")]
+use wasip3::sockets::ip_name_lookup::{ErrorCode, resolve_addresses};
+#[cfg(feature = "p3")]
+use wasip3::sockets::types::IpAddress;
 
 #[rquickjs::module]
 pub mod native_module {
@@ -60,6 +70,7 @@ fn ip_address_family(addr: &IpAddress) -> u32 {
     }
 }
 
+#[cfg(feature = "p2")]
 fn error_code_to_js(error: ErrorCode) -> &'static str {
     match error {
         ErrorCode::NameUnresolvable => "ENOTFOUND",
@@ -74,6 +85,21 @@ fn error_code_to_js(error: ErrorCode) -> &'static str {
     }
 }
 
+// The Preview 3 `wasi:sockets/ip-name-lookup` `error-code` enum only carries the five variants
+// below; the async ABI no longer surfaces `timeout`, `out-of-memory` or `not-supported`.
+#[cfg(feature = "p3")]
+fn error_code_to_js(error: ErrorCode) -> &'static str {
+    match error {
+        ErrorCode::NameUnresolvable => "ENOTFOUND",
+        ErrorCode::TemporaryResolverFailure => "ESERVFAIL",
+        ErrorCode::PermanentResolverFailure => "ESERVFAIL",
+        ErrorCode::AccessDenied => "EREFUSED",
+        ErrorCode::InvalidArgument => "EBADNAME",
+        _ => "ESERVFAIL",
+    }
+}
+
+#[cfg(feature = "p2")]
 fn poll_resolve_stream(stream: &ResolveAddressStream) -> Result<Vec<IpAddress>, ErrorCode> {
     let mut addresses = Vec::new();
     loop {
@@ -89,6 +115,7 @@ fn poll_resolve_stream(stream: &ResolveAddressStream) -> Result<Vec<IpAddress>, 
     }
 }
 
+#[cfg(feature = "p2")]
 async fn resolve_impl(ctx: &Ctx<'_>, hostname: &str) -> rquickjs::Result<Vec<DnsResult>> {
     let network = instance_network();
     let stream = resolve_addresses(&network, hostname).map_err(|e| {
@@ -121,6 +148,28 @@ async fn resolve_impl(ctx: &Ctx<'_>, hostname: &str) -> rquickjs::Result<Vec<Dns
                     &format!("{{\"code\":\"{code}\",\"hostname\":\"{hostname}\"}}"),
                 ));
             }
+        }
+    }
+}
+
+// On Preview 3 `resolve-addresses` is a single async call returning the full address list, so no
+// stream polling is required.
+#[cfg(feature = "p3")]
+async fn resolve_impl(ctx: &Ctx<'_>, hostname: &str) -> rquickjs::Result<Vec<DnsResult>> {
+    match resolve_addresses(hostname.to_string()).await {
+        Ok(addresses) => Ok(addresses
+            .iter()
+            .map(|addr| DnsResult {
+                address: ip_address_to_string(addr),
+                family: ip_address_family(addr),
+            })
+            .collect()),
+        Err(e) => {
+            let code = error_code_to_js(e);
+            Err(Exception::throw_message(
+                ctx,
+                &format!("{{\"code\":\"{code}\",\"hostname\":\"{hostname}\"}}"),
+            ))
         }
     }
 }

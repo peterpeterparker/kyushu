@@ -64,8 +64,13 @@ pub mod native_module {
     }
 
     #[rquickjs::function]
-    pub fn is_logging_enabled() -> bool {
+    pub fn is_logging_enabled(ctx: rquickjs::Ctx<'_>) -> bool {
         cfg!(feature = "logging")
+            && ctx
+                .userdata::<crate::internal::runtime_services::RuntimeServices>()
+                .expect("runtime services not initialized")
+                .output_sink()
+                .is_component_output()
     }
 
     #[rquickjs::function]

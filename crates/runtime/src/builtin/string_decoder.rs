@@ -259,6 +259,25 @@ mod tests {
     }
 
     #[test]
+    fn test_truncated_valid_prefix() {
+        // F0 9F: truncated but valid 4-byte prefix → single FFFD
+        assert_eq!(utf8_decode_v8(&[0xF0, 0x9F]), "\u{FFFD}");
+    }
+
+    #[test]
+    fn test_invalid_lead_f5_with_continuation() {
+        // F5 83: F5 is an invalid lead (max valid is F4), 83 is a stray
+        // continuation → two FFFD (matches Buffer.toString('utf8'))
+        assert_eq!(utf8_decode_v8(&[0xF5, 0x83]), "\u{FFFD}\u{FFFD}");
+    }
+
+    #[test]
+    fn test_truncated_surrogate_prefix() {
+        // ED A0: ED followed by a surrogate-range continuation → two FFFD
+        assert_eq!(utf8_decode_v8(&[0xED, 0xA0]), "\u{FFFD}\u{FFFD}");
+    }
+
+    #[test]
     fn test_cc_b8_cd_b9() {
         // CC B8 CD B9 → 0338 0379
         let result = utf8_decode_v8(&[0xCC, 0xB8, 0xCD, 0xB9]);

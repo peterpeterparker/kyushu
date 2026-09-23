@@ -1,5 +1,7 @@
 // node:dns implementation backed by wasi:sockets/ip-name-lookup
 import { resolve as native_resolve } from '__wasm_rquickjs_builtin/dns_native';
+import { ERR_INVALID_ARG_VALUE, ERR_MISSING_ARGS } from '__wasm_rquickjs_builtin/internal/errors';
+import { validateFunction, validatePort } from '__wasm_rquickjs_builtin/internal/validators';
 import { isIP, isIPv4, isIPv6 } from 'node:net';
 
 const NOT_SUPPORTED_ERROR_MSG = 'dns record type queries are not supported in WebAssembly environment';
@@ -64,6 +66,13 @@ function invalidRrtypeError(rrtype) {
     const err = new TypeError(`The argument 'rrtype' is invalid. Received '${rrtype}'`);
     err.code = 'ERR_INVALID_ARG_VALUE';
     return err;
+}
+
+function validateLookupServiceArgs(address, port) {
+    if (isIP(address) === 0) {
+        throw new ERR_INVALID_ARG_VALUE('address', address);
+    }
+    validatePort(port);
 }
 
 function filterByFamily(results, family) {
@@ -299,9 +308,11 @@ export function reverse(ip, callback) {
 }
 
 export function lookupService(address, port, callback) {
-    if (typeof callback !== 'function') {
-        throw new TypeError('callback must be a function');
+    if (arguments.length !== 3) {
+        throw new ERR_MISSING_ARGS('address', 'port', 'callback');
     }
+    validateLookupServiceArgs(address, port);
+    validateFunction(callback, 'callback');
     queueMicrotask(() => callback(Object.assign(
         new Error(`getnameinfo ${NOT_SUPPORTED_ERROR_MSG}`),
         { code: 'ENOTIMP' }
@@ -412,6 +423,10 @@ export const promises = {
     },
 
     lookupService(address, port) {
+        if (arguments.length !== 2) {
+            throw new ERR_MISSING_ARGS('address', 'port');
+        }
+        validateLookupServiceArgs(address, port);
         return new Promise((resolve, reject) => {
             lookupService(address, port, (err, hostname, service) => {
                 if (err) return reject(err);

@@ -110,6 +110,14 @@ const TRACE_EVENTS = ['start', 'end', 'asyncStart', 'asyncEnd', 'error'];
 const TRACING_CHANNEL_CREATED = Symbol.for('wasm-rquickjs.internal.tracing_channel.created');
 const tracingChannelCreatedCh = channel(TRACING_CHANNEL_CREATED);
 
+function markAsyncContext(context) {
+    Object.defineProperty(context, '__dc_async', {
+        value: true,
+        configurable: true,
+        writable: true,
+    });
+}
+
 class TracingChannel {
     constructor(nameOrChannels) {
         if (typeof nameOrChannels === 'string' || typeof nameOrChannels === 'symbol') {
@@ -197,7 +205,7 @@ class TracingChannel {
         return start.runStores(context, () => {
             try {
                 const promise = fn.apply(thisArg, args);
-                context.__dc_async = true;
+                markAsyncContext(context);
                 end.publish(context);
                 return Promise.resolve(promise).then(
                     (result) => {
@@ -275,7 +283,7 @@ class TracingChannel {
         return start.runStores(context, () => {
             try {
                 const result = fn.apply(thisArg, args);
-                context.__dc_async = true;
+                markAsyncContext(context);
                 return result;
             } catch (err) {
                 context.error = err;

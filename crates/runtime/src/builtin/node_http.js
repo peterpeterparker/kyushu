@@ -190,6 +190,10 @@ class FakeAgentSocket extends EventEmitter {
         this.writable = false;
         this.readable = false;
         this._clearTimeoutTimer();
+        const request = this._httpMessage;
+        if (!this._suppressRequestDestroy && request && !request.destroyed) {
+            request.destroy();
+        }
         process.nextTick(() => {
             this.emit('close');
         });
@@ -249,12 +253,16 @@ export class Agent extends EventEmitter {
             throw err;
         }
 
+        this.options = Object.assign(Object.create(null), options);
+        this.options.path = null;
+        if (this.options.noDelay === undefined) {
+            this.options.noDelay = true;
+        }
         this.keepAlive = options.keepAlive || false;
         this.keepAliveMsecs = options.keepAliveMsecs || 1000;
         this.maxSockets = options.maxSockets || Infinity;
         this.maxTotalSockets = options.maxTotalSockets || Infinity;
         this.maxFreeSockets = options.maxFreeSockets || 256;
-        this.timeout = options.timeout;
         this.scheduling = scheduling;
         this.freeSockets = {};
         this.requests = {};
@@ -474,7 +482,7 @@ export class Agent extends EventEmitter {
     keepSocketAlive(socket) {
         socket.setKeepAlive(true, this.keepAliveMsecs);
         socket.unref();
-        const agentTimeout = this.timeout || 0;
+        const agentTimeout = this.options.timeout || 0;
         if (agentTimeout) {
             socket.setTimeout(agentTimeout);
         }
@@ -1138,6 +1146,9 @@ IncomingMessage.prototype._destroy = function _destroy(err, cb) {
     if (this._nativeRes && typeof this._nativeRes.discardBody === 'function') {
         this._nativeRes.discardBody();
     }
+    if (!this.complete && this.req && !this.req.destroyed) {
+        this.req.destroy();
+    }
     cb(err);
 };
 
@@ -1761,7 +1772,6 @@ export class ClientRequest extends OutgoingMessage {
                 this._nativeReq.setHeader(entry[0], headerValueForNative(entry[0], entry[1]));
             }
         }
-
         this._pendingWrites = [];
         this._bufferedBytes = 0;
         this._needDrain = false;
@@ -1810,7 +1820,7 @@ export class ClientRequest extends OutgoingMessage {
         }
 
         const requestTimeout = options.timeout !== undefined ? options.timeout
-            : (this.agent && this.agent.timeout != null ? this.agent.timeout : undefined);
+            : (this.agent && this.agent.options ? this.agent.options.timeout : undefined);
         if (requestTimeout !== undefined && requestTimeout > 0) {
             this.setTimeout(requestTimeout);
         }
@@ -2243,7 +2253,7 @@ export class ClientRequest extends OutgoingMessage {
         mockSocket.once('timeout', this.timeoutCb);
 
         // Apply timeout value to the socket
-        const timeout = this._timeout || (agent && agent.timeout) || 0;
+        const timeout = this._timeout || (agent && agent.options && agent.options.timeout) || 0;
         if (timeout > 0) {
             mockSocket.timeout = timeout;
         }
@@ -2259,6 +2269,14 @@ export class ClientRequest extends OutgoingMessage {
             const socket = this.socket;
             const agent = this.agent;
             const name = this._agentName;
+            const destroyForCleanup = () => {
+                socket._suppressRequestDestroy = true;
+                try {
+                    socket.destroy();
+                } finally {
+                    socket._suppressRequestDestroy = false;
+                }
+            };
 
             // Remove request-specific timeout listener
             if (this.timeoutCb) {
@@ -2301,12 +2319,12 @@ export class ClientRequest extends OutgoingMessage {
                     }
 
                     // keepSocketAlive returned false or maxFreeSockets exceeded
-                    socket.destroy();
+                    destroyForCleanup();
                     return;
                 }
             }
 
-            socket.destroy();
+            destroyForCleanup();
         }
     }
 
@@ -2407,7 +2425,15 @@ export class ClientRequest extends OutgoingMessage {
                     onClientResponseFinish.publish({ request: this, response: res });
                 }
                 this._response = res;
+                res.req = this;
                 this.emit('response', res);
+
+                if (this.aborted || this.destroyed) {
+                    if (res._nativeRes && typeof res._nativeRes.discardBody === 'function') {
+                        res._nativeRes.discardBody();
+                    }
+                    return;
+                }
 
                 const hasDataListeners = res.listenerCount('data') > 0;
                 const hasEndListeners = res.listenerCount('end') > 0;
@@ -2417,10 +2443,7 @@ export class ClientRequest extends OutgoingMessage {
                     res.resume();
                 } else if (hasReadableListeners) {
                     res.read(0);
-                } else if (res._nativeRes && typeof res._nativeRes.discardBody === 'function') {
-                    res._nativeRes.discardBody();
-                    res.complete = true;
-                    res.push(null);
+                } else {
                     res.resume();
                 }
             }
@@ -2485,6 +2508,8 @@ export class ClientRequest extends OutgoingMessage {
             }
 
             const res = new IncomingMessage(null);
+            this._response = res;
+            res.req = this;
             res.statusCode = parsed.statusCode;
             res.statusMessage = parsed.statusMessage;
             applyHttpVersion(res, parsed.httpVersion);
@@ -2550,13 +2575,9 @@ export class ClientRequest extends OutgoingMessage {
             this._response.destroyed = true;
             this._response.emit('aborted');
         }
-        const targetPort = this.port;
         process.nextTick(() => {
             this.emit('abort');
             this._emitCloseOnce();
-            if (targetPort) {
-                _signalClientAbort(+targetPort);
-            }
         });
     }
 
@@ -2566,7 +2587,6 @@ export class ClientRequest extends OutgoingMessage {
         this.destroyed = true;
 
         this._abortNativeRequest();
-
         if (!error && !this._response) {
             // Request destroyed before receiving a response — emit ECONNRESET
             // matching Node.js behavior for destroyed pending requests.
@@ -2586,7 +2606,6 @@ export class ClientRequest extends OutgoingMessage {
                 this._emitCloseOnce();
             });
         }
-
         return this;
     }
 }
@@ -2596,8 +2615,8 @@ export class ClientRequest extends OutgoingMessage {
 import {
     Server as _Server,
     ServerResponse as _ServerResponse,
+    ServerIncomingMessage as _ServerIncomingMessage,
     createServer as _createServer,
-    _signalClientAbort,
 } from '__wasm_rquickjs_builtin/node_http_server';
 
 import { connect as _netConnect } from 'node:net';
@@ -2605,6 +2624,12 @@ import { connect as _netConnect } from 'node:net';
 export const Server = _Server;
 export const ServerResponse = _ServerResponse;
 export const createServer = _createServer;
+// ServerIncomingMessage owns server parser state, while this prototype link
+// deliberately shares the public IncomingMessage stream methods and identity.
+// Keep duplicated public header/trailer fields aligned when either constructor
+// changes; transport-specific parsing must remain in its existing owner.
+Object.setPrototypeOf(_ServerIncomingMessage.prototype, IncomingMessage.prototype);
+Object.setPrototypeOf(_ServerIncomingMessage, IncomingMessage);
 
 // ===== request / get =====
 

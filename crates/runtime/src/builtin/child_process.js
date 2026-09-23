@@ -10,6 +10,7 @@ import { Buffer } from 'node:buffer';
 import { EventEmitter } from 'node:events';
 import process from 'node:process';
 import moduleExports from 'node:module';
+import { check_syntax_with_filename as checkSyntaxWithFilename } from '__wasm_rquickjs_builtin/vm_native';
 
 const FIPS_STARTUP_ERROR = 'OpenSSL error when trying to enable FIPS: fips mode not supported';
 
@@ -121,7 +122,26 @@ function isInlineEvalOption(value) {
 }
 
 function execArgTakesValue(arg) {
-    return arg === '--openssl-config' || arg === '--input-type' || arg === '--require' || arg === '-r';
+    return arg === '--openssl-config' || arg === '--input-type' || arg === '--require' || arg === '-r' ||
+        arg === '--conditions' || arg === '-C';
+}
+
+function packageConditionsFromExecArgv(execArgv) {
+    const conditions = [];
+    function add(condition) {
+        if (condition) conditions.push(condition);
+    }
+    for (let i = 0; i < execArgv.length; i++) {
+        const arg = String(execArgv[i]);
+        if (arg.indexOf('--conditions=') === 0) {
+            add(arg.slice('--conditions='.length));
+        } else if (arg === '--conditions' || arg === '-C') {
+            if (i + 1 < execArgv.length) {
+                add(String(execArgv[++i]));
+            }
+        }
+    }
+    return conditions;
 }
 
 function splitExecArgvAndInvocationArgs(args) {
@@ -646,6 +666,8 @@ function runInline(command, args, options) {
 
     const oldArgv = process.argv.slice();
     const oldExecArgv = Array.isArray(process.execArgv) ? process.execArgv.slice() : [];
+    const hadPackageConditions = Object.prototype.hasOwnProperty.call(globalThis, '__wasm_rquickjs_package_conditions');
+    const oldPackageConditions = globalThis.__wasm_rquickjs_package_conditions;
     const oldArgv0 = process.argv0;
     const oldRequireModuleFeature = process.features && process.features.require_module;
     const oldCwd = process.cwd;
@@ -668,6 +690,11 @@ function runInline(command, args, options) {
     const oldStderrWrite = process.stderr && process.stderr.write;
     const oldEmitWarning = process.emitWarning;
     const oldExit = process.exit;
+    const runtimeRequire = moduleExports.require;
+    const oldModuleCache = moduleExports._cache;
+    const oldRuntimeRequireCache = runtimeRequire.cache;
+    const oldPathCache = moduleExports._pathCache;
+    const oldModuleWrapper = moduleExports.wrapper;
     let firstExitCode = null;
     const hadSimpleSourceMaps = Object.prototype.hasOwnProperty.call(globalThis, '__wasm_rquickjs_simple_source_maps');
     const oldSimpleSourceMaps = globalThis.__wasm_rquickjs_simple_source_maps;
@@ -688,6 +715,11 @@ function runInline(command, args, options) {
     try {
         process.argv = [String(command)].concat(invocationArgs);
         process.execArgv = execArgv;
+        globalThis.__wasm_rquickjs_package_conditions = packageConditionsFromExecArgv(execArgv);
+        const childModuleCache = Object.create(null);
+        moduleExports._cache = childModuleCache;
+        runtimeRequire.cache = childModuleCache;
+        moduleExports._pathCache = Object.create(null);
         process.argv0 = String(command);
         if (process.features) {
             process.features.require_module = execArgv.indexOf('--no-experimental-require-module') === -1;
@@ -763,8 +795,6 @@ function runInline(command, args, options) {
                 }
             };
         }
-
-        const runtimeRequire = moduleExports.require;
 
         if (stdinData !== null) {
             try {
@@ -923,7 +953,42 @@ function runInline(command, args, options) {
             }
 
             const moduleModule = runtimeRequire('module');
-            if (moduleModule && typeof moduleModule.runMain === 'function') {
+            if (checkSyntaxMode) {
+                const fsForCheck = runtimeRequire('node:fs');
+                let source = fsForCheck.readFileSync(scriptPath, 'utf8');
+                if (source.length > 0 && source.charCodeAt(0) === 0xFEFF) {
+                    source = source.slice(1);
+                }
+                if (source.length > 1 && source.charCodeAt(0) === 0x23 && source.charCodeAt(1) === 0x21) {
+                    source = '//' + source;
+                }
+                let isModule = scriptPath.endsWith('.mjs');
+                if (!isModule && !scriptPath.endsWith('.cjs') &&
+                    (scriptPath.endsWith('.js') || path.extname(scriptPath) === '')) {
+                    const packageScopeInfo = globalThis.__wasm_rquickjs_cjs_package_scope_info;
+                    const packageScope = typeof packageScopeInfo === 'function'
+                        ? packageScopeInfo(scriptPath)
+                        : null;
+                    if (packageScope != null && packageScope.packageType === 'module') {
+                        isModule = true;
+                    } else {
+                        const explicitlyCommonJs = packageScope != null &&
+                            (packageScope.packageType === 'commonjs' ||
+                                (packageScope.packageType == null &&
+                                    packageScope.isNodeModulesPackage === true));
+                        const classifySource =
+                            globalThis.__wasm_rquickjs_source_uses_esm_format;
+                        isModule = !explicitlyCommonJs &&
+                            typeof classifySource === 'function' &&
+                            classifySource(source);
+                    }
+                }
+                checkSyntaxWithFilename(
+                    isModule ? source : moduleModule.wrap(source),
+                    scriptPath,
+                    isModule,
+                );
+            } else if (moduleModule && typeof moduleModule.runMain === 'function') {
                 moduleModule.runMain();
             } else {
                 runtimeRequire(scriptPath);
@@ -948,6 +1013,15 @@ function runInline(command, args, options) {
     } finally {
         process.argv = oldArgv;
         process.execArgv = oldExecArgv;
+        moduleExports._cache = oldModuleCache;
+        runtimeRequire.cache = oldRuntimeRequireCache;
+        moduleExports._pathCache = oldPathCache;
+        moduleExports.wrapper = oldModuleWrapper;
+        if (hadPackageConditions) {
+            globalThis.__wasm_rquickjs_package_conditions = oldPackageConditions;
+        } else {
+            delete globalThis.__wasm_rquickjs_package_conditions;
+        }
         process.argv0 = oldArgv0;
         if (process.features) {
             process.features.require_module = oldRequireModuleFeature;

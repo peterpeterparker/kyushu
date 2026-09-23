@@ -139,14 +139,18 @@ function utf8Text(buf, i) {
   return utf8Decode(buf, i, end);
 }
 
-// For UTF-8, a replacement character is added when ending on a partial
-// character.
+// For UTF-8, decode the buffered bytes of a partial character via the native
+// DFA so the emitted replacement characters exactly match Buffer.toString().
+// A truncated-but-valid prefix (e.g. F0 9F) yields a single U+FFFD, but
+// buffered bytes that are themselves invalid — an F5..FF lead, or a lone
+// ED A0 surrogate prefix — yield one U+FFFD per maximal invalid subpart.
 function utf8End(buf) {
-  let r = buf && buf.length ? this.write(buf) : '';
+  const r = buf && buf.length ? this.write(buf) : '';
   if (this.lastNeed) {
-    r += '\ufffd';
+    const end = this.lastTotal - this.lastNeed;
     this.lastNeed = 0;
     this.lastTotal = 0;
+    return r + utf8Decode(this.lastChar, 0, end);
   }
   return r;
 }
