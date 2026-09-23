@@ -14,8 +14,7 @@ pub fn stream_response(
     }
 
     // We never send trailers. Dropping the sender resolves them to the default: none.
-    let (trailers_tx, trailers_rx) =
-        wit_future::new(|| Ok::<Option<Trailers>, ErrorCode>(None));
+    let (trailers_tx, trailers_rx) = wit_future::new(|| Ok::<Option<Trailers>, ErrorCode>(None));
 
     // The body is streamed: the response gets the reader, the sender is written below.
     let (contents, body_tx) = match body {
