@@ -8,3 +8,7 @@
   background-color: var(--sl-color-gray-1);
   border-color: var(--sl-color-gray-1);
 }
+
+.sl-link-button.not-content.minimal:hover {
+  text-decoration: underline;
+}
