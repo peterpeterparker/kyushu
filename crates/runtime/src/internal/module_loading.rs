@@ -6,7 +6,7 @@
 use indexmap::IndexMap;
 use rquickjs::convert::Coerced;
 use rquickjs::function::This;
-use rquickjs::loader::{BuiltinResolver, FileResolver, Loader, Resolver, ImportAttributes};
+use rquickjs::loader::{BuiltinResolver, FileResolver, ImportAttributes, Loader, Resolver};
 use rquickjs::object::{Accessor, Property};
 use rquickjs::prelude::Opt;
 use rquickjs::{
@@ -438,7 +438,13 @@ impl PrivateBuiltinResolverGuard {
 }
 
 impl Resolver for PrivateBuiltinResolverGuard {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         if !Self::is_private_builtin(name) || !Self::is_user_referrer(base) {
             return Err(Error::new_resolving(base, name));
         }
@@ -3202,7 +3208,13 @@ impl FileUrlResolver {
 }
 
 impl Resolver for FileUrlResolver {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         if let Some(encoded) = name.strip_prefix("file://") {
             let end = encoded.find(['?', '#']).unwrap_or(encoded.len());
             if NodeFileResolver::has_encoded_path_separator(&encoded[..end]) {
@@ -3295,7 +3307,13 @@ fn static_registered_file_url_from_id(id: &str) -> Option<String> {
 }
 
 impl Resolver for RegisteredLoaderResolver {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         let globals = ctx.globals();
         let Ok(resolve_fn) =
             globals.get::<_, Function>("__wasm_rquickjs_resolve_static_registered_loader")
@@ -3366,7 +3384,13 @@ impl Loader for StaticRegisteredFileUrlLoader {
 struct RealmGuardResolver;
 
 impl Resolver for RealmGuardResolver {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         if base != "<input>" {
             return Err(Error::new_resolving(base, name));
         }
@@ -3404,7 +3428,13 @@ impl Resolver for RealmGuardResolver {
 struct MockModuleResolver;
 
 impl Resolver for MockModuleResolver {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         let globals = ctx.globals();
 
         let canonical_key_fn: Function = globals
@@ -3522,7 +3552,13 @@ impl CjsEvalResolver {
 }
 
 impl Resolver for CjsEvalResolver {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         if base != "<input>" {
             return Err(Error::new_resolving(base, name));
         }
@@ -3835,7 +3871,13 @@ impl NodeFileResolver {
 }
 
 impl Resolver for NodeFileResolver {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         if name.contains("://") || name.starts_with("node:") {
             return Err(Error::new_resolving(base, name));
         }
@@ -3927,7 +3969,13 @@ struct NodeModuleErrorResolver;
 struct NodeBuiltinNamespaceGuard;
 
 impl Resolver for NodeBuiltinNamespaceGuard {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         if !name.starts_with("node:") {
             return Err(Error::new_resolving(base, name));
         }
@@ -6475,7 +6523,13 @@ fn import_meta_trailing_slash_package_has_exports(
 }
 
 impl Resolver for NodeModulesResolver {
-    fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
+    fn resolve<'js>(
+        &mut self,
+        ctx: &Ctx<'js>,
+        base: &str,
+        name: &str,
+        _attributes: Option<ImportAttributes<'js>>,
+    ) -> rquickjs::Result<String> {
         let (resolution_name, suffix) = if has_import_type_rewrite_token(name) {
             split_module_path_suffix(name)
         } else {

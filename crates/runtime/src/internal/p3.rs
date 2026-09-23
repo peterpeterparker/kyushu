@@ -270,7 +270,7 @@ impl JsState {
                     .catch(&ctx)
                     .unwrap_or_else(|e| panic!("Failed to finish importing user module {name}:\n{}", format_caught_error(e)));
             }
-            
+
             for f in crate::JS_ADDITIONAL_FUNCTIONS.iter() {
                 f(&ctx).expect("Failed to run init function");
             }
@@ -437,10 +437,8 @@ struct RuntimeWriterLease {
     active_writers: Cell<usize>,
     writer_generation: Cell<usize>,
     next_waiter_id: Cell<usize>,
-    activation_waiters:
-        RefCell<HashMap<usize, futures::channel::oneshot::Sender<()>>>,
-    inactivity_waiters:
-        RefCell<HashMap<usize, futures::channel::oneshot::Sender<()>>>,
+    activation_waiters: RefCell<HashMap<usize, futures::channel::oneshot::Sender<()>>>,
+    inactivity_waiters: RefCell<HashMap<usize, futures::channel::oneshot::Sender<()>>>,
 }
 
 impl RuntimeWriterLease {
@@ -472,9 +470,7 @@ impl RuntimeWriterLease {
                 .checked_add(1)
                 .expect("runtime writer lease generation overflowed"),
         );
-        RuntimeWriterGuard {
-            lease: self,
-        }
+        RuntimeWriterGuard { lease: self }
     }
 
     fn has_active_writers(&self) -> bool {
@@ -506,7 +502,10 @@ impl RuntimeWriterLease {
                 .expect("runtime writer activation waiter id overflowed"),
         );
         let (sender, receiver) = futures::channel::oneshot::channel();
-        let previous = self.activation_waiters.borrow_mut().insert(waiter_id, sender);
+        let previous = self
+            .activation_waiters
+            .borrow_mut()
+            .insert(waiter_id, sender);
         debug_assert!(previous.is_none());
         Some(WriterActivationWaiter {
             lease: self,
@@ -527,7 +526,10 @@ impl RuntimeWriterLease {
                 .expect("runtime writer inactivity waiter id overflowed"),
         );
         let (sender, receiver) = futures::channel::oneshot::channel();
-        let previous = self.inactivity_waiters.borrow_mut().insert(waiter_id, sender);
+        let previous = self
+            .inactivity_waiters
+            .borrow_mut()
+            .insert(waiter_id, sender);
         debug_assert!(previous.is_none());
         Some(WriterInactivityWaiter {
             lease: self,
@@ -760,10 +762,7 @@ async fn cleanup_retained_driver(js_state: &'static JsState, drive_guard: DriveG
 /// before the activation is observed, normal draining is retried.
 async fn finish_async_export(js_state: &'static JsState, mut drive_guard: DriveGuard) {
     loop {
-        drive_guard = match js_state
-            .writer_lease
-            .retain_driver_if_active(drive_guard)
-        {
+        drive_guard = match js_state.writer_lease.retain_driver_if_active(drive_guard) {
             Ok(()) => return,
             Err(drive_guard) => drive_guard,
         };
