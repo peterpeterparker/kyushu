@@ -22,7 +22,10 @@ pub async fn handle(request: Request) -> Result<Response, ErrorCode> {
         fields.append(k, v.as_bytes()).ok();
     }
 
-    // Dropping the trailers writer resolves the future to its default value: no trailers.
+    // A WASI 0.3 response takes a future which the host awaits after the body to know whether
+    // it completed successfully and if trailers (headers sent after the body) follow.
+    // We never send trailers. `trailers_tx` is dropped once the body is written, which
+    // resolves the future to the default `Ok(None)`: body complete, no trailers.
     let (trailers_tx, trailers_rx) =
         wit_future::new(|| Ok::<Option<Trailers>, ErrorCode>(None));
 
