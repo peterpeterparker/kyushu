@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 // The bulk of this module performs filesystem I/O through `std::fs`, which is backed by the
-// WASI filesystem on the `wasm32-wasip2` target for both generation paths. Only the
-// `utimes`/`lutimes` family needs the host `wasi:filesystem` bindings directly (to set times on
-// a path with symlink control). The *Preview 2* bindings are used on both generation paths:
-// Preview 3 replaced `set-times-at` with an async component-model call, and driving it to
+// WASI filesystem on the `wasm32-wasip2` target for both generation paths. Symlink creation and
+// the `utimes`/`lutimes` family use the host `wasi:filesystem` bindings directly. The *Preview 2*
+// bindings are used on both generation paths: symlink creation is synchronous, while Preview 3
+// replaced `set-times-at` with an async component-model call. Driving that call to
 // completion from inside a synchronous native function (which runs inside JS execution, i.e.
 // inside a poll of the exported call's wit-bindgen task) requires a nested `block_on`. That
 // nested `block_on` deadlocks: wit-bindgen's executor keeps spawned tasks in a crate-global
@@ -79,12 +78,53 @@ fn wasi_fs_error_to_io(e: &wasi_fs_types::ErrorCode) -> std::io::Error {
             std::io::Error::new(std::io::ErrorKind::PermissionDenied, e.to_string())
         }
         ErrorCode::Exist => std::io::Error::new(std::io::ErrorKind::AlreadyExists, e.to_string()),
+        ErrorCode::NotDirectory => {
+            std::io::Error::new(std::io::ErrorKind::NotADirectory, e.to_string())
+        }
+        ErrorCode::Loop => std::io::Error::other("too many levels of symbolic links"),
         ErrorCode::BadDescriptor => {
             std::io::Error::from_raw_os_error(8) // EBADF on WASI
         }
         ErrorCode::Invalid => std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()),
         _ => std::io::Error::other(e.to_string()),
     }
+}
+
+fn resolve_preopen_relative(
+    dirs: &[(wasi_fs_types::Descriptor, String)],
+    path: &str,
+) -> Option<(usize, String)> {
+    let mut best_match = None;
+    let mut best_prefix_len = 0;
+
+    for (index, (_, dir_path)) in dirs.iter().enumerate() {
+        let normalized = dir_path.trim_end_matches('/');
+        let candidate = if normalized == "/" || normalized.is_empty() {
+            Some(path.trim_start_matches('/').to_string())
+        } else if path == normalized {
+            Some(".".to_string())
+        } else if path.starts_with(normalized)
+            && path.as_bytes().get(normalized.len()) == Some(&b'/')
+        {
+            Some(path[normalized.len() + 1..].to_string())
+        } else {
+            None
+        };
+
+        if let Some(relative) = candidate {
+            let prefix_len = if normalized == "/" {
+                1
+            } else {
+                normalized.len()
+            };
+            if prefix_len >= best_prefix_len {
+                best_prefix_len = prefix_len;
+                best_match = Some((index, relative));
+            }
+        }
+    }
+
+    best_match
 }
 
 fn set_path_times(
@@ -104,37 +144,7 @@ fn set_path_times(
 
     let dirs = wasi_fs_preopens::get_directories();
 
-    // Find the best matching preopened directory (longest prefix)
-    let mut best_match: Option<(usize, String)> = None;
-    let mut best_prefix_len: usize = 0;
-
-    for (i, (_, dir_path)) in dirs.iter().enumerate() {
-        let normalized = dir_path.trim_end_matches('/');
-        if normalized == "/" || normalized.is_empty() {
-            let relative = path.trim_start_matches('/').to_string();
-            let prefix_len = if normalized == "/" { 1 } else { 0 };
-            if prefix_len >= best_prefix_len {
-                best_prefix_len = prefix_len;
-                best_match = Some((i, relative));
-            }
-        } else if path == normalized {
-            let prefix_len = normalized.len();
-            if prefix_len >= best_prefix_len {
-                best_prefix_len = prefix_len;
-                best_match = Some((i, ".".to_string()));
-            }
-        } else if path.starts_with(normalized)
-            && path.as_bytes().get(normalized.len()) == Some(&b'/')
-        {
-            let prefix_len = normalized.len();
-            if prefix_len >= best_prefix_len {
-                best_prefix_len = prefix_len;
-                best_match = Some((i, path[normalized.len() + 1..].to_string()));
-            }
-        }
-    }
-
-    if let Some((idx, relative)) = best_match {
+    if let Some((idx, relative)) = resolve_preopen_relative(&dirs, path) {
         dirs[idx]
             .0
             .set_times_at(path_flags, &relative, atime, mtime)
@@ -145,6 +155,54 @@ fn set_path_times(
             "no matching preopened directory",
         ))
     }
+}
+
+fn symlink_at_path(target: &str, path: &str) -> std::io::Result<()> {
+    if std::path::Path::new(target).is_absolute() {
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "file already exists",
+                ));
+            }
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+            Err(_) => {}
+        }
+
+        let parent = std::path::Path::new(path)
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        match std::fs::metadata(parent) {
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotADirectory,
+                    "not a directory",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) => return Err(error),
+        }
+
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "symbolic link targets must be relative within a WASI preopen",
+        ));
+    }
+
+    let dirs = wasi_fs_preopens::get_directories();
+    let Some((index, relative)) = resolve_preopen_relative(&dirs, path) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "no matching preopened directory",
+        ));
+    };
+
+    dirs[index]
+        .0
+        .symlink_at(target, &relative)
+        .map_err(|error| wasi_fs_error_to_io(&error))
 }
 
 const MODE_PERMISSION_MASK: u32 = 0o7777;
@@ -244,137 +302,69 @@ fn rename_fd_path(ctx: &rquickjs::Ctx<'_>, old_path: &str, new_path: &str) {
     });
 }
 
-fn set_emulated_symlink(ctx: &rquickjs::Ctx<'_>, path: &str, target: &str) {
-    with_fs_mut(ctx, |fs| {
-        fs.emulated_symlinks
-            .insert(path.to_string(), target.to_string());
-    });
-}
-
-fn get_emulated_symlink_target(ctx: &rquickjs::Ctx<'_>, path: &str) -> Option<String> {
-    with_fs(ctx, |fs| fs.emulated_symlinks.get(path).cloned())
-}
-
-fn remove_emulated_symlink(ctx: &rquickjs::Ctx<'_>, path: &str) {
-    with_fs_mut(ctx, |fs| {
-        fs.emulated_symlinks.remove(path);
-    });
-}
-
-fn remove_emulated_symlinks_under(ctx: &rquickjs::Ctx<'_>, dir: &str) {
-    let prefix = if dir.ends_with('/') {
-        dir.to_string()
-    } else {
-        format!("{dir}/")
-    };
-    with_fs_mut(ctx, |fs| {
-        fs.emulated_symlinks.retain(|k, _| !k.starts_with(&prefix))
-    });
-}
-
-fn move_emulated_symlink(ctx: &rquickjs::Ctx<'_>, old_path: &str, new_path: &str) {
-    with_fs_mut(ctx, |fs| {
-        if let Some(target) = fs.emulated_symlinks.remove(old_path) {
-            fs.emulated_symlinks.insert(new_path.to_string(), target);
-        }
-    });
-}
-
-fn apply_emulated_symlink_to_stat_obj<'js>(stat_obj: &rquickjs::Object<'js>) {
-    stat_obj.set("isFile", false).unwrap();
-    stat_obj.set("isDirectory", false).unwrap();
-    stat_obj.set("isSymlink", true).unwrap();
-}
-
-/// Resolve emulated symlinks in a path by walking each component and following
-/// symlink chains. Returns an ELOOP error if too many symlinks are followed.
-fn resolve_emulated_symlinks_checked(
-    ctx: &rquickjs::Ctx<'_>,
+pub(super) fn realpath_for_module_resolution(
+    _ctx: &rquickjs::Ctx<'_>,
     path: &str,
-) -> std::io::Result<String> {
-    with_fs(ctx, |fs| {
-        resolve_emulated_symlinks_from(&fs.emulated_symlinks, path)
-    })
+) -> Option<String> {
+    canonicalize_guest_path(path).ok()
 }
 
-fn resolve_emulated_symlinks_from(
-    emulated_symlinks: &HashMap<String, String>,
-    path: &str,
-) -> std::io::Result<String> {
-    if emulated_symlinks.is_empty() {
-        return Ok(path.to_string());
+fn canonicalize_guest_path(path: &str) -> std::io::Result<String> {
+    if !path.starts_with('/') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "realpath requires an absolute path",
+        ));
     }
 
     const MAX_SYMLINK_FOLLOWS: usize = 40;
     let mut symlink_count = 0;
-
-    // Build absolute path
-    if !path.starts_with('/') {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "emulated symlink resolution requires an absolute path",
-        ));
-    }
-    let abs_path = path.to_string();
-
-    // Split into segments to process
-    let mut todo: Vec<String> = abs_path
+    let mut todo = path
         .split('/')
-        .filter(|s| !s.is_empty())
+        .filter(|segment| !segment.is_empty())
         .map(String::from)
-        .collect();
-    let mut resolved: Vec<String> = Vec::new();
-    let mut i = 0;
+        .collect::<Vec<_>>();
+    let mut resolved = Vec::<String>::new();
+    let mut index = 0;
 
-    while i < todo.len() {
-        let seg = todo[i].clone();
-
-        if seg == "." {
-            i += 1;
-            continue;
+    while index < todo.len() {
+        match todo[index].as_str() {
+            "." => {
+                index += 1;
+                continue;
+            }
+            ".." => {
+                resolved.pop();
+                index += 1;
+                continue;
+            }
+            segment => resolved.push(segment.to_string()),
         }
 
-        if seg == ".." {
-            resolved.pop();
-            i += 1;
-            continue;
-        }
-
-        resolved.push(seg);
         let current = format!("/{}", resolved.join("/"));
-
-        if let Some(target) = emulated_symlinks.get(&current).cloned() {
+        let metadata = std::fs::symlink_metadata(&current)?;
+        if metadata.is_symlink() {
             symlink_count += 1;
             if symlink_count > MAX_SYMLINK_FOLLOWS {
                 return Err(std::io::Error::other("too many levels of symbolic links"));
             }
 
-            // Remove the symlink component
+            let target = std::fs::read_link(&current)?;
+            let target = target.to_string_lossy();
+            let remaining = todo[index + 1..].to_vec();
             resolved.pop();
-
-            // Collect remaining segments after the symlink
-            let remaining: Vec<String> = todo[i + 1..].to_vec();
-
-            // Parse target into segments
-            let target_segments: Vec<String> = target
+            if target.starts_with('/') {
+                resolved.clear();
+            }
+            todo = target
                 .split('/')
-                .filter(|s| !s.is_empty())
+                .filter(|segment| !segment.is_empty())
                 .map(String::from)
                 .collect();
-
-            if target.starts_with('/') {
-                // Absolute target: clear resolved, restart from root
-                resolved.clear();
-                todo = target_segments;
-                todo.extend(remaining);
-            } else {
-                // Relative target: prepend to remaining
-                todo = target_segments;
-                todo.extend(remaining);
-            }
-            i = 0;
+            todo.extend(remaining);
+            index = 0;
         } else {
-            i += 1;
+            index += 1;
         }
     }
 
@@ -385,36 +375,13 @@ fn resolve_emulated_symlinks_from(
     }
 }
 
-pub(super) fn realpath_for_module_resolution_with_symlinks(
-    emulated_symlinks: &HashMap<String, String>,
-    path: &str,
-) -> Option<String> {
-    let resolved_path = resolve_emulated_symlinks_from(emulated_symlinks, path).ok()?;
-    std::fs::symlink_metadata(&resolved_path).ok()?;
-    Some(resolved_path)
-}
-
-/// Resolve emulated symlinks in a path. Falls back to the original path on error.
-fn resolve_emulated_symlinks(ctx: &rquickjs::Ctx<'_>, path: &str) -> String {
-    resolve_emulated_symlinks_checked(ctx, path).unwrap_or_else(|_| path.to_string())
-}
-
-pub(super) fn realpath_for_module_resolution(
-    ctx: &rquickjs::Ctx<'_>,
-    path: &str,
-) -> Option<String> {
-    let resolved_path = resolve_emulated_symlinks_checked(ctx, path).ok()?;
-    std::fs::symlink_metadata(&resolved_path)
-        .ok()
-        .map(|_| resolved_path)
-}
-
 fn map_error_code(err: &std::io::Error) -> (&'static str, i32, &'static str) {
     match err.kind() {
         std::io::ErrorKind::NotFound => ("ENOENT", -2, "no such file or directory"),
         std::io::ErrorKind::AlreadyExists => ("EEXIST", -17, "file already exists"),
         std::io::ErrorKind::PermissionDenied => ("EACCES", -13, "permission denied"),
         std::io::ErrorKind::InvalidInput => ("EINVAL", -22, "invalid argument"),
+        std::io::ErrorKind::NotADirectory => ("ENOTDIR", -20, "not a directory"),
         _ => {
             let err_text = err.to_string().to_lowercase();
             if err_text.contains("too many levels of symbolic links") || err_text.contains("eloop")
@@ -566,7 +533,9 @@ fn metadata_to_obj<'js>(
 
     obj.set("dev", 0_f64).unwrap();
     obj.set("ino", 0_f64).unwrap();
-    let mode: f64 = if meta.is_dir() {
+    let mode: f64 = if meta.is_symlink() {
+        41471.0 // 0o120777
+    } else if meta.is_dir() {
         16877.0 // 0o40755
     } else {
         33188.0 // 0o100644
@@ -780,7 +749,6 @@ pub mod native_module {
         match std::fs::remove_file(Path::new(&fs_path)) {
             Ok(_) => {
                 super::remove_mode_override_for_path(&ctx, &fs_path);
-                super::remove_emulated_symlink(&ctx, &fs_path);
                 None
             }
             Err(err) => Some(super::make_fs_error(&ctx, &err, "unlink", Some(&path))),
@@ -795,7 +763,6 @@ pub mod native_module {
             Ok(_) => {
                 super::move_mode_override_for_path(&ctx, &old_fs_path, &new_fs_path);
                 super::rename_fd_path(&ctx, &old_fs_path, &new_fs_path);
-                super::move_emulated_symlink(&ctx, &old_fs_path, &new_fs_path);
                 None
             }
             Err(err) => Some(super::make_fs_error_with_dest(
@@ -839,7 +806,7 @@ pub mod native_module {
             return result;
         }
 
-        let fs_path = super::resolve_emulated_symlinks(&ctx, &runtime_path(&ctx, &path));
+        let fs_path = runtime_path(&ctx, &path);
 
         let mut opts = OpenOptions::new();
 
@@ -1150,7 +1117,7 @@ pub mod native_module {
             return result;
         }
 
-        let fs_path = super::resolve_emulated_symlinks(&ctx, &runtime_path(&ctx, &path));
+        let fs_path = runtime_path(&ctx, &path);
 
         match std::fs::metadata(&fs_path) {
             Ok(meta) => {
@@ -1189,25 +1156,14 @@ pub mod native_module {
             return result;
         }
 
-        // For lstat: if the path itself is an emulated symlink, use the
-        // original path (we'll mark it as symlink below). Otherwise resolve
-        // intermediate symlinks so paths through symlinks work.
         let absolute_path = runtime_path(&ctx, &path);
-        let fs_path = if super::get_emulated_symlink_target(&ctx, &absolute_path).is_some() {
-            absolute_path.clone()
-        } else {
-            super::resolve_emulated_symlinks(&ctx, &absolute_path)
-        };
 
-        match std::fs::symlink_metadata(&fs_path) {
+        match std::fs::symlink_metadata(&absolute_path) {
             Ok(meta) => {
                 let stat_obj = super::metadata_to_obj(&ctx, &meta);
                 if let Some(mode_override) = super::get_mode_override_for_path(&ctx, &absolute_path)
                 {
                     super::apply_mode_override_to_stat_obj(&stat_obj, mode_override);
-                }
-                if super::get_emulated_symlink_target(&ctx, &absolute_path).is_some() {
-                    super::apply_emulated_symlink_to_stat_obj(&stat_obj);
                 }
                 result.set("stat", stat_obj).unwrap();
             }
@@ -1287,7 +1243,7 @@ pub mod native_module {
             return result;
         }
 
-        let fs_path = super::resolve_emulated_symlinks(&ctx, &runtime_path(&ctx, &path));
+        let fs_path = runtime_path(&ctx, &path);
 
         match std::fs::read_dir(&fs_path) {
             Ok(entries) => {
@@ -1338,7 +1294,7 @@ pub mod native_module {
             return Some(super::wizer_enoent_obj(&ctx, "access", Some(&path)));
         }
 
-        let fs_path = super::resolve_emulated_symlinks(&ctx, &runtime_path(&ctx, &path));
+        let fs_path = runtime_path(&ctx, &path);
 
         // For WASI, just check if the path exists (and is accessible)
         match std::fs::metadata(&fs_path) {
@@ -1366,27 +1322,12 @@ pub mod native_module {
             return result;
         }
 
-        // Use chain-resolving emulated symlink resolution
         let absolute_path = runtime_path(&ctx, &path);
-        match super::resolve_emulated_symlinks_checked(&ctx, &absolute_path) {
+        match super::canonicalize_guest_path(&absolute_path) {
             Ok(resolved_path) => {
-                // Verify the final resolved path exists
-                match std::fs::symlink_metadata(&resolved_path) {
-                    Ok(_) => {
-                        result.set("result", resolved_path).unwrap();
-                    }
-                    Err(err) => {
-                        result
-                            .set(
-                                "error",
-                                super::make_fs_error(&ctx, &err, "realpath", Some(&path)),
-                            )
-                            .unwrap();
-                    }
-                }
+                result.set("result", resolved_path).unwrap();
             }
             Err(err) => {
-                // ELOOP or other resolution error
                 result
                     .set(
                         "error",
@@ -1447,27 +1388,13 @@ pub mod native_module {
 
     #[rquickjs::function]
     pub fn fs_symlink(ctx: Ctx<'_>, target: String, path: String) -> Option<Object<'_>> {
-        let fs_path = runtime_path(&ctx, &path);
-        if Path::new(&fs_path).exists() {
-            let err = std::io::Error::new(std::io::ErrorKind::AlreadyExists, "file already exists");
-            return Some(super::make_fs_error_with_dest(
-                &ctx,
-                &err,
-                "symlink",
-                Some(&target),
-                Some(&path),
-            ));
+        if crate::internal::is_wizer_active() {
+            return Some(super::wizer_enoent_obj(&ctx, "symlink", Some(&path)));
         }
 
-        match std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&fs_path)
-        {
-            Ok(_) => {
-                super::set_emulated_symlink(&ctx, &fs_path, &target);
-                None
-            }
+        let fs_path = runtime_path(&ctx, &path);
+        match super::symlink_at_path(&target, &fs_path) {
+            Ok(()) => None,
             Err(err) => Some(super::make_fs_error_with_dest(
                 &ctx,
                 &err,
@@ -1482,11 +1409,6 @@ pub mod native_module {
     pub fn fs_readlink(ctx: Ctx<'_>, path: String) -> Object<'_> {
         let result = Object::new(ctx.clone()).unwrap();
         let fs_path = runtime_path(&ctx, &path);
-
-        if let Some(target) = super::get_emulated_symlink_target(&ctx, &fs_path) {
-            result.set("result", target).unwrap();
-            return result;
-        }
 
         if crate::internal::is_wizer_active() {
             result
@@ -1683,7 +1605,6 @@ pub mod native_module {
                     match result {
                         Ok(_) => {
                             super::remove_mode_override_for_path(&ctx, &fs_path);
-                            super::remove_emulated_symlinks_under(&ctx, &fs_path);
                             None
                         }
                         Err(err) => Some(super::make_fs_error(&ctx, &err, "rm", Some(&path))),
@@ -1692,7 +1613,6 @@ pub mod native_module {
                     match std::fs::remove_file(&fs_path) {
                         Ok(_) => {
                             super::remove_mode_override_for_path(&ctx, &fs_path);
-                            super::remove_emulated_symlink(&ctx, &fs_path);
                             None
                         }
                         Err(err) => Some(super::make_fs_error(&ctx, &err, "rm", Some(&path))),
@@ -1800,7 +1720,7 @@ pub mod native_module {
 
     #[rquickjs::function]
     pub fn fs_exists(ctx: Ctx<'_>, path: String) -> bool {
-        let fs_path = super::resolve_emulated_symlinks(&ctx, &runtime_path(&ctx, &path));
+        let fs_path = runtime_path(&ctx, &path);
 
         std::path::Path::new(&fs_path).exists()
     }

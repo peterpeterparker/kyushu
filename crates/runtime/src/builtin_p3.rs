@@ -57,10 +57,10 @@ mod dns;
 mod domain;
 #[path = "builtin/encoding.rs"]
 mod encoding;
-#[path = "builtin/execution.rs"]
-pub(crate) mod execution;
 #[path = "builtin/events.rs"]
 mod events;
+#[path = "builtin/execution.rs"]
+pub(crate) mod execution;
 #[path = "builtin/formdata_node.rs"]
 mod formdata_node;
 #[path = "builtin/fs.rs"]
@@ -71,6 +71,8 @@ mod gc;
 mod http;
 #[path = "builtin/http2.rs"]
 mod http2;
+#[path = "builtin/http_body_p3.rs"]
+mod http_body;
 #[path = "builtin/https.rs"]
 mod https;
 #[path = "builtin/ieee754.rs"]
@@ -107,6 +109,8 @@ mod querystring;
 mod readline;
 #[path = "builtin/repl.rs"]
 mod repl;
+#[path = "builtin/shared_response_body.rs"]
+mod shared_response_body;
 #[path = "builtin/socket_helpers.rs"]
 mod socket_helpers;
 #[cfg(feature = "sqlite")]
@@ -180,13 +184,6 @@ pub(crate) fn realpath_for_module_resolution(
     path: &str,
 ) -> Option<String> {
     fs::realpath_for_module_resolution(ctx, path)
-}
-
-pub(crate) fn realpath_for_module_resolution_with_symlinks(
-    emulated_symlinks: &std::collections::HashMap<String, String>,
-    path: &str,
-) -> Option<String> {
-    fs::realpath_for_module_resolution_with_symlinks(emulated_symlinks, path)
 }
 
 /// Registers builtin native and JavaScript module names with the resolver.
@@ -301,6 +298,7 @@ pub fn add_module_resolvers(
         .with_module("node:inspector")
         .with_module("inspector")
         .with_module("__wasm_rquickjs_builtin/node_http_native")
+        .with_module("__wasm_rquickjs_builtin/node_http_incoming")
         .with_module("__wasm_rquickjs_builtin/node_http_server")
         .with_module("node:_http_common")
         .with_module("_http_common")
@@ -335,6 +333,7 @@ pub fn add_module_resolvers(
         .with_module("tty")
         .with_module("node:v8")
         .with_module("v8")
+        .with_module("__wasm_rquickjs_builtin/v8_native")
         .with_module("node:worker_threads")
         .with_module("worker_threads")
         .with_module("__wasm_rquickjs_builtin/zlib_native")
@@ -410,6 +409,7 @@ pub fn module_loader() -> (
             web_crypto::js_native_module,
         )
         .with_module("__wasm_rquickjs_builtin/vm_native", vm::js_native_module)
+        .with_module("__wasm_rquickjs_builtin/v8_native", v8::js_native_module)
         .with_module(
             "__wasm_rquickjs_builtin/string_decoder_native",
             string_decoder::js_native_module,
@@ -561,6 +561,10 @@ pub fn module_loader() -> (
         .with_module("dns/promises", dns::REEXPORT_PROMISES_JS)
         .with_module("node:domain", domain::DOMAIN_JS)
         .with_module("domain", domain::REEXPORT_JS)
+        .with_module(
+            "__wasm_rquickjs_builtin/node_http_incoming",
+            node_http::HTTP_INCOMING_JS,
+        )
         .with_module(
             "__wasm_rquickjs_builtin/node_http_server",
             node_http::NODE_HTTP_SERVER_JS,

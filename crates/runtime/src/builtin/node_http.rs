@@ -50,6 +50,25 @@ enum RequestState {
     Aborted,
 }
 
+fn discard_request_state(state: RequestState) {
+    match state {
+        RequestState::Started {
+            body,
+            stream,
+            future_response,
+        } => {
+            // WASI resources form a parent/child tree. The output stream must
+            // be dropped and the outgoing body finished before either parent
+            // resource can be released. This also covers requests abandoned
+            // by userland without end() or abort().
+            drop(stream);
+            let _ = wasi_http::OutgoingBody::finish(body, None);
+            drop(future_response);
+        }
+        other => drop(other),
+    }
+}
+
 #[derive(Trace, JsLifetime)]
 #[rquickjs::class(rename_all = "camelCase")]
 pub struct NodeHttpClientRequest {
@@ -474,7 +493,15 @@ impl NodeHttpClientRequest {
 
     pub fn abort(&mut self) {
         self.aborted = true;
-        self.state = RequestState::Aborted;
+        let state = std::mem::replace(&mut self.state, RequestState::Aborted);
+        discard_request_state(state);
+    }
+}
+
+impl Drop for NodeHttpClientRequest {
+    fn drop(&mut self) {
+        let state = std::mem::replace(&mut self.state, RequestState::Aborted);
+        discard_request_state(state);
     }
 }
 
@@ -749,6 +776,7 @@ async fn write_all_to_stream<'js>(
 
 pub const NODE_HTTP_JS: &str = include_str!("node_http.js");
 pub const NODE_HTTP_SERVER_JS: &str = include_str!("node_http_server.js");
+pub const HTTP_INCOMING_JS: &str = include_str!("node_http_incoming.js");
 pub const HTTP_COMMON_JS: &str = include_str!("node_http_common.js");
 pub const HTTP_AGENT_JS: &str = include_str!("node_http_agent.js");
 pub const REEXPORT_JS: &str = r#"export * from 'node:http'; export { default } from 'node:http';"#;

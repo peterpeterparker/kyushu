@@ -109,12 +109,6 @@ function scheduleTimeout(callback, time, args, isInterval) {
     const wrapped = function(...a) {
         const currentId = this._id;
         try {
-            // Drain pending nextTick callbacks before executing timer callbacks,
-            // matching Node.js's guarantee that process.nextTick always fires
-            // before timers (setTimeout/setImmediate).
-            if (globalThis.__wasm_rquickjs_drainNextTick) {
-                globalThis.__wasm_rquickjs_drainNextTick();
-            }
             return _restoreContext(snapshot, callback, this, a);
         } catch (e) {
             if (globalThis.__wasm_rquickjs_handleUncaughtError) {

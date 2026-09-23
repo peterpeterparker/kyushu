@@ -27,6 +27,7 @@
 //! sits unpolled would deadlock the shared async executor. The response body is still streamed
 //! chunk-by-chunk (not read to completion eagerly).
 
+use super::http_body::ResponseBody;
 use rquickjs::class::Trace;
 use rquickjs::prelude::List;
 use rquickjs::{Ctx, Exception, JsLifetime, TypedArray};
@@ -34,18 +35,10 @@ use std::future::Future;
 use std::pin::Pin;
 use url::Url;
 use wasip3::http::types::{ErrorCode, Fields, Method, Request, Response, Scheme, Trailers};
-use wasip3::wit_bindgen::rt::async_support::{
-    FutureReader, FutureWriter, StreamReader, StreamResult,
-};
 
 /// Boxed, pinned future that drives a `wasi:http/client.send` and the request-body upload
 /// concurrently, resolving once the response head is available.
 type SendFuture = Pin<Box<dyn Future<Output = Result<Response, ErrorCode>>>>;
-
-/// Reader half of the response body result future. Resolves once the response body stream is
-/// closed, reporting whether the body was received successfully.
-type BodyResultReader = FutureReader<Result<Option<Trailers>, ErrorCode>>;
-type ResponseResultWriter = FutureWriter<Result<(), ErrorCode>>;
 
 #[rquickjs::module]
 pub mod native_module {
@@ -375,29 +368,11 @@ impl NodeHttpClientRequest {
     }
 }
 
-enum ResponseBodyState {
-    /// Response head received; the body stream has not been consumed yet.
-    Unconsumed(Response),
-    /// The body stream is being read incrementally.
-    Reading {
-        reader: StreamReader<u8>,
-        result: BodyResultReader,
-        response_result: ResponseResultWriter,
-    },
-    /// The body stream reported end-of-stream after a final data chunk; the body result future
-    /// still needs to be awaited to surface a mid-transfer error.
-    Finishing {
-        result: BodyResultReader,
-        response_result: ResponseResultWriter,
-    },
-    Consumed,
-}
-
 #[derive(Trace, JsLifetime)]
 #[rquickjs::class(rename_all = "camelCase")]
 pub struct NodeHttpIncomingResponse {
     #[qjs(skip_trace)]
-    body_state: ResponseBodyState,
+    body: ResponseBody,
     headers: Vec<Vec<String>>,
     status: u16,
 }
@@ -413,7 +388,7 @@ impl NodeHttpIncomingResponse {
     #[qjs(constructor)]
     pub fn new() -> Self {
         NodeHttpIncomingResponse {
-            body_state: ResponseBodyState::Consumed,
+            body: ResponseBody::empty(),
             headers: Vec::new(),
             status: 0,
         }
@@ -422,7 +397,7 @@ impl NodeHttpIncomingResponse {
     #[qjs(skip)]
     pub(crate) fn from_raw_response(raw: RawResponse) -> Self {
         NodeHttpIncomingResponse {
-            body_state: ResponseBodyState::Unconsumed(raw.response),
+            body: ResponseBody::new(raw.response),
             headers: raw.headers,
             status: raw.status,
         }
@@ -440,128 +415,26 @@ impl NodeHttpIncomingResponse {
 
     pub fn discard_body(&mut self) {
         // Dropping the response / stream reader / result future discards the body without reading.
-        self.body_state = ResponseBodyState::Consumed;
+        self.body.discard();
     }
 
     pub async fn read_body_chunk<'js>(
         &mut self,
         ctx: Ctx<'js>,
     ) -> rquickjs::Result<List<(Option<TypedArray<'js, u8>>, bool)>> {
-        let state = std::mem::replace(&mut self.body_state, ResponseBodyState::Consumed);
-
-        match state {
-            ResponseBodyState::Unconsumed(response) => {
-                // Consume the response body stream. The `res` future signals a handling result to
-                // the transport; we always signal success by letting its writer resolve to `Ok(())`.
-                let (res_tx, res_rx) = wasip3::wit_future::new(|| Ok::<(), ErrorCode>(()));
-                let (reader, result) = Response::consume_body(response, res_rx);
-                self.body_state = ResponseBodyState::Reading {
-                    reader,
-                    result,
-                    response_result: res_tx,
-                };
-                self.read_from_reader(ctx).await
+        match self.body.read_chunk().await {
+            Ok(Some(bytes)) => {
+                let chunk = TypedArray::new_copy(ctx.clone(), bytes).map_err(|_| {
+                    Exception::throw_message(
+                        &ctx,
+                        "Failed to create TypedArray from response body chunk",
+                    )
+                })?;
+                Ok(List((Some(chunk), false)))
             }
-            ResponseBodyState::Reading {
-                reader,
-                result,
-                response_result,
-            } => {
-                self.body_state = ResponseBodyState::Reading {
-                    reader,
-                    result,
-                    response_result,
-                };
-                self.read_from_reader(ctx).await
-            }
-            ResponseBodyState::Finishing {
-                result,
-                response_result,
-            } => {
-                drop(response_result);
-                let body_error = body_result_error(result).await;
-                if let Some(err) = body_error {
-                    return Err(Exception::throw_message(&ctx, &err));
-                }
-                Ok(List((None, true)))
-            }
-            ResponseBodyState::Consumed => Ok(List((None, true))),
+            Ok(None) => Ok(List((None, true))),
+            Err(error) => Err(Exception::throw_message(&ctx, &error)),
         }
-    }
-}
-
-impl NodeHttpIncomingResponse {
-    async fn read_from_reader<'js>(
-        &mut self,
-        ctx: Ctx<'js>,
-    ) -> rquickjs::Result<List<(Option<TypedArray<'js, u8>>, bool)>> {
-        let state = std::mem::replace(&mut self.body_state, ResponseBodyState::Consumed);
-
-        let ResponseBodyState::Reading {
-            mut reader,
-            result,
-            response_result,
-        } = state
-        else {
-            return Ok(List((None, true)));
-        };
-
-        const CHUNK_SIZE: usize = 16384;
-        loop {
-            let (status, buf) = reader.read(Vec::with_capacity(CHUNK_SIZE)).await;
-            match status {
-                StreamResult::Complete(_) if !buf.is_empty() => {
-                    let js_array = TypedArray::new_copy(ctx.clone(), buf).map_err(|_| {
-                        Exception::throw_message(
-                            &ctx,
-                            "Failed to create TypedArray from response body chunk",
-                        )
-                    })?;
-                    self.body_state = ResponseBodyState::Reading {
-                        reader,
-                        result,
-                        response_result,
-                    };
-                    return Ok(List((Some(js_array), false)));
-                }
-                // A zero-length completion carries no data and no EOF signal; retry.
-                StreamResult::Complete(_) => continue,
-                StreamResult::Dropped => {
-                    // Body stream closed. Drop the reader; a final data chunk (if any) is returned
-                    // now and the body result future is checked on the next call.
-                    drop(reader);
-                    if buf.is_empty() {
-                        drop(response_result);
-                        let body_error = body_result_error(result).await;
-                        if let Some(err) = body_error {
-                            return Err(Exception::throw_message(&ctx, &err));
-                        }
-                        return Ok(List((None, true)));
-                    }
-                    let js_array = TypedArray::new_copy(ctx.clone(), buf).map_err(|_| {
-                        Exception::throw_message(
-                            &ctx,
-                            "Failed to create TypedArray from response body chunk",
-                        )
-                    })?;
-                    self.body_state = ResponseBodyState::Finishing {
-                        result,
-                        response_result,
-                    };
-                    return Ok(List((Some(js_array), false)));
-                }
-                StreamResult::Cancelled => return Ok(List((None, true))),
-            }
-        }
-    }
-}
-
-/// Awaits the response body result future, returning an error message if the body failed
-/// mid-transfer (e.g. a truncated response).
-async fn body_result_error(result: BodyResultReader) -> Option<String> {
-    match result.await {
-        Ok(_) => None,
-        Err(e) => Some(format!("HTTP response body error: {e:?}")),
     }
 }
 
@@ -721,6 +594,7 @@ fn fields_to_pairs(fields: &Fields) -> Vec<Vec<String>> {
 
 pub const NODE_HTTP_JS: &str = include_str!("node_http.js");
 pub const NODE_HTTP_SERVER_JS: &str = include_str!("node_http_server.js");
+pub const HTTP_INCOMING_JS: &str = include_str!("node_http_incoming.js");
 pub const HTTP_COMMON_JS: &str = include_str!("node_http_common.js");
 pub const HTTP_AGENT_JS: &str = include_str!("node_http_agent.js");
 pub const REEXPORT_JS: &str = r#"export * from 'node:http'; export { default } from 'node:http';"#;

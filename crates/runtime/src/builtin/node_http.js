@@ -3,6 +3,7 @@ import { NodeHttpClientRequest } from '__wasm_rquickjs_builtin/node_http_native'
 import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
 import Readable from '__wasm_rquickjs_builtin/internal/streams/readable';
+import { initializeIncomingMessage } from '__wasm_rquickjs_builtin/node_http_incoming';
 
 import { channel } from 'node:diagnostics_channel';
 import { kOutHeaders } from '__wasm_rquickjs_builtin/internal/http';
@@ -23,6 +24,7 @@ const onClientRequestCreated = channel('http.client.request.created');
 const onClientRequestStart = channel('http.client.request.start');
 const onClientRequestError = channel('http.client.request.error');
 const onClientResponseFinish = channel('http.client.response.finish');
+let customAgentTransportWarningEmitted = false;
 
 // ===== Static Data =====
 
@@ -584,257 +586,6 @@ function isCookieHeader(name) {
     return typeof name === 'string' && name.toLowerCase() === 'cookie';
 }
 
-// ===== Socket Transport HTTP Response Parser =====
-
-function parseChunkedBody(raw) {
-    let result = '';
-    let pos = 0;
-
-    while (pos < raw.length) {
-        const lineEnd = raw.indexOf('\r\n', pos);
-        if (lineEnd === -1) break;
-
-        const sizeStr = raw.substring(pos, lineEnd).trim();
-        const size = parseInt(sizeStr, 16);
-        if (isNaN(size) || size === 0) break;
-
-        pos = lineEnd + 2;
-        result += raw.substring(pos, pos + size);
-        pos += size + 2;
-    }
-
-    return result;
-}
-
-function parseRawHttpResponse(raw) {
-    const headerEnd = raw.indexOf('\r\n\r\n');
-    if (headerEnd === -1) {
-        throw new Error('Incomplete HTTP response headers');
-    }
-
-    const headerSection = raw.substring(0, headerEnd);
-    const bodyRaw = raw.substring(headerEnd + 4);
-
-    const lines = headerSection.split('\r\n');
-    const statusLine = lines[0];
-    const match = statusLine.match(/^HTTP\/(\d+\.\d+)\s+(\d+)\s*(.*)/);
-    if (!match) {
-        throw new Error('Invalid HTTP status line');
-    }
-
-    const httpVersion = match[1];
-    const statusCode = parseInt(match[2], 10);
-    const statusMessage = match[3] || '';
-
-    const headers = [];
-    let isChunked = false;
-    let contentLength = -1;
-
-    for (let i = 1; i < lines.length; i++) {
-        const colonIdx = lines[i].indexOf(':');
-        if (colonIdx > 0) {
-            const name = lines[i].substring(0, colonIdx).trim();
-            const value = lines[i].substring(colonIdx + 1).trim();
-            headers.push([name, value]);
-            const lower = name.toLowerCase();
-            if (lower === 'transfer-encoding' && value.toLowerCase().includes('chunked')) {
-                isChunked = true;
-            }
-            if (lower === 'content-length') {
-                contentLength = parseInt(value, 10);
-            }
-        }
-    }
-
-    let body;
-    if (isChunked) {
-        body = parseChunkedBody(bodyRaw);
-    } else if (contentLength >= 0) {
-        body = bodyRaw.substring(0, contentLength);
-    } else {
-        body = bodyRaw;
-    }
-
-    return { httpVersion, statusCode, statusMessage, headers, body };
-}
-
-function _readHttpResponseFromSocket(socket) {
-    return new Promise((resolve, reject) => {
-        let buffer = '';
-        let headersParsed = false;
-        let contentLength = -1;
-        let isChunked = false;
-        let headerEndPos = -1;
-        let parsedResult = null;
-
-        const cleanup = () => {
-            socket.removeListener('data', onData);
-            socket.removeListener('end', onEnd);
-            socket.removeListener('error', onError);
-        };
-
-        const tryComplete = () => {
-            if (!headersParsed) {
-                headerEndPos = buffer.indexOf('\r\n\r\n');
-                if (headerEndPos === -1) return false;
-
-                const headerSection = buffer.substring(0, headerEndPos);
-                const lines = headerSection.split('\r\n');
-                const match = lines[0].match(/^HTTP\/(\d+\.\d+)\s+(\d+)\s*(.*)/);
-                if (!match) {
-                    cleanup();
-                    reject(new Error('Invalid HTTP status line'));
-                    return true;
-                }
-
-                const headers = [];
-                for (let i = 1; i < lines.length; i++) {
-                    const colonIdx = lines[i].indexOf(':');
-                    if (colonIdx > 0) {
-                        const name = lines[i].substring(0, colonIdx).trim();
-                        const value = lines[i].substring(colonIdx + 1).trim();
-                        headers.push([name, value]);
-                        const lower = name.toLowerCase();
-                        if (lower === 'transfer-encoding' && value.toLowerCase().includes('chunked')) {
-                            isChunked = true;
-                        }
-                        if (lower === 'content-length') {
-                            contentLength = parseInt(value, 10);
-                        }
-                    }
-                }
-
-                parsedResult = {
-                    httpVersion: match[1],
-                    statusCode: parseInt(match[2], 10),
-                    statusMessage: match[3] || '',
-                    headers,
-                };
-                headersParsed = true;
-            }
-
-            const bodyData = buffer.substring(headerEndPos + 4);
-
-            if (contentLength === 0) {
-                cleanup();
-                resolve({ ...parsedResult, body: '' });
-                return true;
-            }
-
-            if (contentLength > 0) {
-                if (bodyData.length >= contentLength) {
-                    cleanup();
-                    resolve({ ...parsedResult, body: bodyData.substring(0, contentLength) });
-                    return true;
-                }
-                return false;
-            }
-
-            if (isChunked) {
-                const termIdx = bodyData.indexOf('0\r\n');
-                if (termIdx !== -1) {
-                    cleanup();
-                    resolve({ ...parsedResult, body: parseChunkedBody(bodyData) });
-                    return true;
-                }
-                return false;
-            }
-
-            return false;
-        };
-
-        const onData = (chunk) => {
-            buffer += typeof chunk === 'string' ? chunk : chunk.toString();
-            tryComplete();
-        };
-
-        const onEnd = () => {
-            cleanup();
-            if (headersParsed) {
-                const bodyData = buffer.substring(headerEndPos + 4);
-                resolve({ ...parsedResult, body: isChunked ? parseChunkedBody(bodyData) : bodyData });
-            } else {
-                reject(new Error('Connection closed before headers received'));
-            }
-        };
-
-        const onError = (err) => {
-            cleanup();
-            reject(err);
-        };
-
-        socket.on('data', onData);
-        socket.on('end', onEnd);
-        socket.on('error', onError);
-
-        if (typeof socket.resume === 'function') {
-            socket.resume();
-        }
-    });
-}
-
-function _readConnectResponseHeaders(socket) {
-    return new Promise((resolve, reject) => {
-        let buffer = '';
-
-        const cleanup = () => {
-            socket.removeListener('data', onData);
-            socket.removeListener('end', onEnd);
-            socket.removeListener('error', onError);
-        };
-
-        const onData = (chunk) => {
-            buffer += typeof chunk === 'string' ? chunk : chunk.toString();
-            const headerEnd = buffer.indexOf('\r\n\r\n');
-            if (headerEnd === -1) return;
-
-            cleanup();
-            const headerSection = buffer.substring(0, headerEnd);
-            const lines = headerSection.split('\r\n');
-            const match = lines[0].match(/^HTTP\/(\d+\.\d+)\s+(\d+)\s*(.*)/);
-            if (!match) {
-                reject(new Error('Invalid HTTP status line'));
-                return;
-            }
-
-            const headers = [];
-            for (let i = 1; i < lines.length; i++) {
-                const colonIdx = lines[i].indexOf(':');
-                if (colonIdx > 0) {
-                    headers.push([
-                        lines[i].substring(0, colonIdx).trim(),
-                        lines[i].substring(colonIdx + 1).trim(),
-                    ]);
-                }
-            }
-
-            resolve({
-                httpVersion: match[1],
-                statusCode: parseInt(match[2], 10),
-                statusMessage: match[3] || '',
-                headers,
-            });
-        };
-
-        const onEnd = () => {
-            cleanup();
-            reject(new Error('Connection closed before headers received'));
-        };
-
-        const onError = (err) => {
-            cleanup();
-            reject(err);
-        };
-
-        socket.on('data', onData);
-        socket.on('end', onEnd);
-        socket.on('error', onError);
-        if (typeof socket.resume === 'function') {
-            socket.resume();
-        }
-    });
-}
-
 function expandHeaderValuesForWire(name, value) {
     if (!Array.isArray(value)) {
         return [String(value)];
@@ -1048,18 +799,9 @@ export function IncomingMessage(nativeRes, options) {
         this.httpVersionMajor = null;
         this.httpVersionMinor = null;
     }
-    this.complete = false;
+    initializeIncomingMessage(this, hasNativeResponse ? null : nativeRes);
     this.method = hasNativeResponse ? undefined : null;
     this.url = hasNativeResponse ? undefined : '';
-    this.socket = hasNativeResponse ? null : nativeRes;
-    this.client = this.socket;
-    this.trailers = {};
-    this.trailersDistinct = {};
-    this.rawTrailers = [];
-    this.aborted = false;
-    this._consuming = false;
-    this._dumped = false;
-    this._timeout = null;
 
     const joinDup = !!(options && options.joinDuplicateHeaders);
     const parsedHeaders = parseIncomingHeaders(
@@ -1085,6 +827,13 @@ IncomingMessage.prototype.setTimeout = function setTimeout(ms, callback) {
     this._timeout = ms;
     if (callback) this.once('timeout', callback);
     return this;
+};
+
+IncomingMessage.prototype._dump = function _dump() {
+    if (this._dumped) return;
+    this._dumped = true;
+    this.removeAllListeners('data');
+    this.resume();
 };
 
 IncomingMessage.prototype._read = function _read(n) {
@@ -1706,7 +1455,7 @@ export class ClientRequest extends OutgoingMessage {
         const port = options.port;
         const defaultPort = options.defaultPort || (this.agent && this.agent.defaultPort);
         const protocolDefault = this.protocol === 'https:' ? 443 : 80;
-        const effectivePort = (port !== undefined && port !== null) ? Number(port) : (defaultPort || protocolDefault);
+        const effectivePort = Number(port || defaultPort || protocolDefault);
         this.path = options.path || '/';
         this.hostname = hostname;
         this.port = effectivePort;
@@ -1777,6 +1526,7 @@ export class ClientRequest extends OutgoingMessage {
         this._needDrain = false;
         this._flushPromise = Promise.resolve();
         this._nativeStarted = false;
+        this._transportRejected = false;
 
         this.aborted = false;
         this.socket = null;
@@ -1790,11 +1540,10 @@ export class ClientRequest extends OutgoingMessage {
         this._joinDuplicateHeaders = !!options.joinDuplicateHeaders;
 
         this._initializeCustomConnection(options);
-
-        if (this.method === 'CONNECT' && !this._useSocketTransport) {
-            const connectSocket = _netConnect(this.port, this.hostname);
-            this.socket = connectSocket;
-            this._useSocketTransport = true;
+        if (this.method === 'CONNECT' && !this._transportRejected) {
+            this._rejectUnsupportedTransport(
+                'HTTP CONNECT tunnel sockets are not supported; outbound requests use wasi:http',
+            );
         }
 
         if (typeof callback === 'function') {
@@ -1863,53 +1612,40 @@ export class ClientRequest extends OutgoingMessage {
     }
 
     _initializeCustomConnection(options) {
-        let createConnection;
-        if (typeof options.createConnection === 'function') {
-            createConnection = options.createConnection;
-        } else if (this.agent && this.agent !== false && typeof this.agent.createConnection === 'function') {
-            createConnection = this.agent.createConnection.bind(this.agent);
+        const hasAgentHook = this.agent && typeof this.agent.createConnection === 'function';
+        if (hasAgentHook && !customAgentTransportWarningEmitted) {
+            // Agent implementations commonly expose createConnection even when
+            // they are used only for request metadata and scheduling (including
+            // npm's direct registry agent). wasm-rquickjs cannot invoke that
+            // socket hook without bypassing wasi:http, so make the ignored
+            // transport explicit while retaining the Agent metadata contract.
+            customAgentTransportWarningEmitted = true;
+            process.emitWarning(
+                'Custom node:http Agent createConnection hooks are ignored; outbound requests use wasi:http',
+                { code: 'WASM_RQUICKJS_HTTP_AGENT_TRANSPORT' },
+            );
         }
+        if (typeof options.createConnection !== 'function') return;
 
-        if (!createConnection) {
-            return;
-        }
+        // An explicit per-request custom socket must never bypass wasi:http.
+        // Fail asynchronously so callers can attach their normal ClientRequest
+        // error/close listeners. Rejected requests always terminate with close,
+        // including when callers destroy them before this rejection tick and
+        // suppress the ENOSYS error.
+        this._rejectUnsupportedTransport(
+            'Custom node:http createConnection transports are not supported; outbound requests use wasi:http',
+        );
+    }
 
-        let oncreateCalled = false;
-        const oncreate = (error, socket) => {
-            if (oncreateCalled) {
-                return;
+    _rejectUnsupportedTransport(message) {
+        this._transportRejected = true;
+        const error = new Error(message);
+        error.code = 'ENOSYS';
+        process.nextTick(() => {
+            if (!this.destroyed && !this.aborted) {
+                this.destroy(error);
             }
-            oncreateCalled = true;
-
-            if (error) {
-                this._connectionFailed = true;
-                process.nextTick(() => {
-                    this._emitRequestError(error);
-                });
-                return;
-            }
-
-            if (!socket) {
-                return;
-            }
-
-            this.socket = socket;
-            this._useSocketTransport = true;
-            if (typeof socket.once === 'function') {
-                socket.once('error', (socketError) => {
-                    this._emitRequestError(socketError);
-                });
-            }
-        };
-
-        try {
-            const maybeSocket = createConnection(options, oncreate);
-            if (maybeSocket) {
-                oncreate(null, maybeSocket);
-            }
-        } catch (error) {
-            oncreate(error);
-        }
+        });
     }
 
     _mergeHeader(name, value) {
@@ -2068,18 +1804,13 @@ export class ClientRequest extends OutgoingMessage {
             this._bodyLength += bodyChunk.length;
             this._bodyChunks.push(bodyChunk);
 
-            if (!this._useSocketTransport) {
+            if (!this._transportRejected) {
                 this._pendingWrites.push({ chunk: bodyChunk, cb: typeof callback === 'function' ? callback : null });
                 this._bufferedBytes += bodyChunk.length;
                 this._scheduleFlush();
             }
         } else if (typeof callback === 'function') {
             callback();
-        }
-
-        if (this._useSocketTransport) {
-            if (typeof callback === 'function') callback();
-            return this._bodyLength < (16 * 1024);
         }
 
         const ret = this._bufferedBytes < (16 * 1024);
@@ -2125,7 +1856,7 @@ export class ClientRequest extends OutgoingMessage {
     }
 
     async _flushLoop() {
-        if (this.destroyed || this.aborted) return;
+        if (this.destroyed || this.aborted || this._transportRejected) return;
 
         // Don't start the native request until end() has been called.
         // Starting early would lock headers before _applyDefaultBodyHeaders
@@ -2168,7 +1899,7 @@ export class ClientRequest extends OutgoingMessage {
     }
 
     _setupMockSocket() {
-        if (this.socket || this._useSocketTransport) {
+        if (this.socket) {
             return;
         }
         let mockSocket = null;
@@ -2329,9 +2060,7 @@ export class ClientRequest extends OutgoingMessage {
     }
 
     async _doSend() {
-        if (this._useSocketTransport) {
-            return this._doSendViaSocket();
-        }
+        if (this._transportRejected) return;
 
         try {
             if (onClientRequestStart.hasSubscribers) {
@@ -2395,13 +2124,7 @@ export class ClientRequest extends OutgoingMessage {
 
             const nativeRes = this._nativeReq.getResponse();
 
-            // When createConnection failed, suppress the response event —
-            // only the error event (emitted by oncreate) should fire.
-            if (this._connectionFailed && nativeRes) {
-                if (typeof nativeRes.discardBody === 'function') {
-                    nativeRes.discardBody();
-                }
-            } else if (nativeRes) {
+            if (nativeRes) {
                 const res = new IncomingMessage(nativeRes, { joinDuplicateHeaders: this._joinDuplicateHeaders });
 
                 // Link response to the request's mock socket
@@ -2426,7 +2149,7 @@ export class ClientRequest extends OutgoingMessage {
                 }
                 this._response = res;
                 res.req = this;
-                this.emit('response', res);
+                const responseHandled = this.emit('response', res);
 
                 if (this.aborted || this.destroyed) {
                     if (res._nativeRes && typeof res._nativeRes.discardBody === 'function') {
@@ -2435,16 +2158,8 @@ export class ClientRequest extends OutgoingMessage {
                     return;
                 }
 
-                const hasDataListeners = res.listenerCount('data') > 0;
-                const hasEndListeners = res.listenerCount('end') > 0;
-                const hasReadableListeners = res.listenerCount('readable') > 0;
-
-                if (hasDataListeners || hasEndListeners) {
-                    res.resume();
-                } else if (hasReadableListeners) {
-                    res.read(0);
-                } else {
-                    res.resume();
+                if (!responseHandled) {
+                    res._dump();
                 }
             }
 
@@ -2456,109 +2171,6 @@ export class ClientRequest extends OutgoingMessage {
             this._emitRequestError(err);
         }
         this._cleanupMockSocket();
-        this._emitCloseOnce();
-    }
-
-    async _doSendViaSocket() {
-        try {
-            if (onClientRequestStart.hasSubscribers) {
-                onClientRequestStart.publish({ request: this });
-            }
-
-            if (!this.hasHeader('host')) {
-                const hostValue = this.port && this.port !== 80 && this.port !== 443
-                    ? this.hostname + ':' + this.port
-                    : this.hostname;
-                this.setHeader('Host', hostValue);
-            }
-
-            this._refreshHeaderString();
-            this.headersSent = true;
-
-            const socket = this.socket;
-
-            if (socket && typeof socket.write === 'function') {
-                socket.write(this._header);
-                for (const chunk of this._bodyChunks) {
-                    socket.write(chunk);
-                }
-            }
-
-            await Promise.resolve();
-
-            this._writableFinished = true;
-            if (typeof this._endCallback === 'function') {
-                const cb = this._endCallback;
-                this._endCallback = null;
-                cb();
-            }
-            this.emit('finish');
-
-            if (this.aborted || this.destroyed) {
-                return;
-            }
-
-            const isConnect = this.method === 'CONNECT';
-            const parsed = isConnect
-                ? await _readConnectResponseHeaders(socket)
-                : await _readHttpResponseFromSocket(socket);
-
-            if (this.aborted || this.destroyed) {
-                return;
-            }
-
-            const res = new IncomingMessage(null);
-            this._response = res;
-            res.req = this;
-            res.statusCode = parsed.statusCode;
-            res.statusMessage = parsed.statusMessage;
-            applyHttpVersion(res, parsed.httpVersion);
-
-            const parsedHeaders = parseIncomingHeaders(
-                parsed.headers.map(([name, value]) => [name, value])
-            );
-            res.rawHeaders = parsedHeaders.rawHeaders;
-            res.headers = parsedHeaders.headers;
-            res.headersDistinct = parsedHeaders.headersDistinct;
-
-            if (isConnect) {
-                res.complete = true;
-                this.emit('connect', res, socket, Buffer.alloc(0));
-            } else {
-                res.socket = socket;
-                res.client = socket;
-                if (socket && typeof socket.readableHighWaterMark === 'number' && res._readableState) {
-                    res._readableState.highWaterMark = socket.readableHighWaterMark;
-                }
-
-                const responseConnectionHeader = res.headers.connection;
-                const responseShouldKeepAlive = shouldKeepAliveFromResponse(
-                    res.httpVersion,
-                    responseConnectionHeader
-                );
-                if (this.shouldKeepAlive && !responseShouldKeepAlive) {
-                    this.shouldKeepAlive = false;
-                    this._last = true;
-                }
-
-                if (onClientResponseFinish.hasSubscribers) {
-                    onClientResponseFinish.publish({ request: this, response: res });
-                }
-                this.emit('response', res);
-
-                if (parsed.body.length > 0) {
-                    res.push(Buffer.from(parsed.body));
-                }
-                res.complete = true;
-                res.push(null);
-            }
-
-        } catch (err) {
-            if (this.aborted || this.destroyed) {
-                return;
-            }
-            this._emitRequestError(err);
-        }
         this._emitCloseOnce();
     }
 
@@ -2587,7 +2199,7 @@ export class ClientRequest extends OutgoingMessage {
         this.destroyed = true;
 
         this._abortNativeRequest();
-        if (!error && !this._response) {
+        if (!error && !this._response && !this._transportRejected) {
             // Request destroyed before receiving a response — emit ECONNRESET
             // matching Node.js behavior for destroyed pending requests.
             error = new Error('socket hang up');
@@ -2618,8 +2230,6 @@ import {
     ServerIncomingMessage as _ServerIncomingMessage,
     createServer as _createServer,
 } from '__wasm_rquickjs_builtin/node_http_server';
-
-import { connect as _netConnect } from 'node:net';
 
 export const Server = _Server;
 export const ServerResponse = _ServerResponse;

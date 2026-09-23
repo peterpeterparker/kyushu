@@ -13,6 +13,7 @@ use wstd::runtime::block_on;
 
 use super::runtime_services::{
     OwnedJsRuntime, RuntimeServices, initialize_builtin_wiring, initialize_dispose_symbols,
+    run_process_turn_checkpoint,
 };
 
 pub const RESOURCE_TABLE_NAME: &str = "__wasm_rquickjs_resources";
@@ -205,48 +206,64 @@ async fn run_pending_gc(js_state: &JsState) {
     }
 }
 
+async fn run_turn_checkpoint(js_state: &JsState) -> bool {
+    async_with!(js_state.ctx => |ctx| {
+        run_process_turn_checkpoint(&ctx).unwrap_or_else(|error| {
+            panic!("failed to run process turn checkpoint: {error}")
+        })
+    })
+    .await
+}
+
 /// Spawns a sentinel task that waits for all ref'd timers to complete,
 /// then aborts remaining unref'd timers so that `idle()` can return.
 async fn drain_and_idle(js_state: &JsState) {
     run_pending_gc(js_state).await;
-    let has_unrefed_timers = async_with!(js_state.ctx => |ctx| {
-        !ctx.userdata::<RuntimeServices>()
-            .expect("runtime services not initialized")
-            .timers
-            .unrefed_timers
-            .borrow()
-            .is_empty()
-    })
-    .await;
-    if !has_unrefed_timers {
+    let mut drove_runtime = false;
+    loop {
+        let checkpoint_did_work = run_turn_checkpoint(js_state).await;
+        if drove_runtime && !checkpoint_did_work {
+            return;
+        }
+        drove_runtime = true;
+
+        let has_unrefed_timers = async_with!(js_state.ctx => |ctx| {
+            !ctx.userdata::<RuntimeServices>()
+                .expect("runtime services not initialized")
+                .timers
+                .unrefed_timers
+                .borrow()
+                .is_empty()
+        })
+        .await;
+        if has_unrefed_timers {
+            // Spawn a sentinel that polls until only unref'd timers remain, then aborts them.
+            async_with!(js_state.ctx => |ctx| {
+                let task_ctx = ctx.clone();
+                ctx.spawn(async move {
+                    loop {
+                        wstd::task::sleep(wstd::time::Duration::from_millis(1)).await;
+                        let services = task_ctx
+                            .userdata::<RuntimeServices>()
+                            .expect("runtime services not initialized");
+                        let abort_count = services.timers.abort_handles.borrow().len();
+                        let unref_count = services.timers.unrefed_timers.borrow().len();
+                        // When the only remaining abort handles are for unref'd timers,
+                        // abort them all (the sentinel itself is not tracked in abort_handles).
+                        if abort_count > 0 && abort_count == unref_count {
+                            services.timers.abort_unrefed();
+                            break;
+                        }
+                        if unref_count == 0 {
+                            break;
+                        }
+                    }
+                });
+            })
+            .await;
+        }
         js_state.rt.idle().await;
-        return;
     }
-    // Spawn a sentinel that polls until only unref'd timers remain, then aborts them.
-    async_with!(js_state.ctx => |ctx| {
-        let task_ctx = ctx.clone();
-        ctx.spawn(async move {
-            loop {
-                wstd::task::sleep(wstd::time::Duration::from_millis(1)).await;
-                let services = task_ctx
-                    .userdata::<RuntimeServices>()
-                    .expect("runtime services not initialized");
-                let abort_count = services.timers.abort_handles.borrow().len();
-                let unref_count = services.timers.unrefed_timers.borrow().len();
-                // When the only remaining abort handles are for unref'd timers,
-                // abort them all (the sentinel itself is not tracked in abort_handles).
-                if abort_count > 0 && abort_count == unref_count {
-                    services.timers.abort_unrefed();
-                    break;
-                }
-                if unref_count == 0 {
-                    break;
-                }
-            }
-        });
-    })
-    .await;
-    js_state.rt.idle().await;
 }
 
 static mut STATE: Option<JsState> = None;

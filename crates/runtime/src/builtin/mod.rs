@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 mod abort_controller;
+#[cfg(feature = "fetch")]
 mod abort_signal;
 mod assert;
 mod async_hooks;
@@ -19,6 +20,7 @@ pub(crate) mod execution;
 mod formdata_node;
 mod fs;
 mod gc;
+mod shared_response_body;
 
 #[cfg(feature = "fetch")]
 mod http;
@@ -114,13 +116,6 @@ pub(crate) fn realpath_for_module_resolution(
     path: &str,
 ) -> Option<String> {
     fs::realpath_for_module_resolution(ctx, path)
-}
-
-pub(crate) fn realpath_for_module_resolution_with_symlinks(
-    emulated_symlinks: &std::collections::HashMap<String, String>,
-    path: &str,
-) -> Option<String> {
-    fs::realpath_for_module_resolution_with_symlinks(emulated_symlinks, path)
 }
 
 pub fn add_module_resolvers(
@@ -240,6 +235,7 @@ pub fn add_module_resolvers(
         .with_module("node:inspector")
         .with_module("inspector")
         .with_module("__wasm_rquickjs_builtin/node_http_native")
+        .with_module("__wasm_rquickjs_builtin/node_http_incoming")
         .with_module("__wasm_rquickjs_builtin/node_http_server")
         .with_module("node:_http_common")
         .with_module("_http_common")
@@ -268,6 +264,7 @@ pub fn add_module_resolvers(
         .with_module("tty")
         .with_module("node:v8")
         .with_module("v8")
+        .with_module("__wasm_rquickjs_builtin/v8_native")
         .with_module("node:worker_threads")
         .with_module("worker_threads")
         .with_module("__wasm_rquickjs_builtin/zlib_native")
@@ -342,6 +339,7 @@ pub fn module_loader() -> (
             web_crypto::js_native_module,
         )
         .with_module("__wasm_rquickjs_builtin/vm_native", vm::js_native_module)
+        .with_module("__wasm_rquickjs_builtin/v8_native", v8::js_native_module)
         .with_module(
             "__wasm_rquickjs_builtin/zlib_native",
             zlib::js_native_module,
@@ -492,6 +490,10 @@ pub fn module_loader() -> (
         .with_module("dns/promises", dns::REEXPORT_PROMISES_JS)
         .with_module("node:domain", domain::DOMAIN_JS)
         .with_module("domain", domain::REEXPORT_JS)
+        .with_module(
+            "__wasm_rquickjs_builtin/node_http_incoming",
+            node_http::HTTP_INCOMING_JS,
+        )
         .with_module(
             "__wasm_rquickjs_builtin/node_http_server",
             node_http::NODE_HTTP_SERVER_JS,

@@ -3,6 +3,7 @@ import { Server as NetServer } from 'node:net';
 import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
 import Readable from '__wasm_rquickjs_builtin/internal/streams/readable';
+import { initializeIncomingMessage } from '__wasm_rquickjs_builtin/node_http_incoming';
 import { ERR_HTTP_BODY_NOT_ALLOWED, ERR_HTTP_CONTENT_LENGTH_MISMATCH, ERR_HTTP_HEADERS_SENT, ERR_HTTP_SOCKET_ASSIGNED, ERR_INVALID_ARG_TYPE, ERR_INVALID_ARG_VALUE, ERR_STREAM_NULL_VALUES, ERR_STREAM_WRITE_AFTER_END } from '__wasm_rquickjs_builtin/internal/errors';
 // STATUS_CODES is duplicated here to avoid circular dependency with node:http
 const STATUS_CODES = {
@@ -121,8 +122,7 @@ function ServerIncomingMessage(socket, method, url, httpVersion, rawHeaderPairs,
 
     Readable.call(this, {});
 
-    this.socket = socket;
-    this.connection = socket;
+    initializeIncomingMessage(this, socket);
     this.method = method;
     this.url = url;
     this.httpVersion = httpVersion;
@@ -136,28 +136,42 @@ function ServerIncomingMessage(socket, method, url, httpVersion, rawHeaderPairs,
     this.headersDistinct = parsed.headersDistinct;
     this.rawHeaders = parsed.rawHeaders;
 
-    this.complete = false;
-    this.aborted = false;
-    this.trailers = {};
-    this.trailersDistinct = {};
-    this.rawTrailers = [];
-    this.client = socket;
-    this._consuming = false;
-    this._dumped = false;
-    this._timeout = null;
 }
 
 Object.setPrototypeOf(ServerIncomingMessage.prototype, Readable.prototype);
 Object.setPrototypeOf(ServerIncomingMessage, Readable);
 
 ServerIncomingMessage.prototype._read = function _read() {
-    // no-op: parser pushes data via this.push()
+    this._consuming = true;
 };
 
-ServerIncomingMessage.prototype.setTimeout = function setTimeout(ms, cb) {
-    this._timeout = ms;
-    if (cb) this.once('timeout', cb);
-    return this;
+ServerIncomingMessage.prototype._destroy = function _destroy(_err, cb) {
+    const aborted = !this.readableEnded || !this.complete;
+    let destroyFinished = false;
+    const finishDestroy = () => {
+        if (destroyFinished) return;
+        destroyFinished = true;
+        process.nextTick(() => {
+            cb(_err && this.listenerCount('error') > 0 ? _err : null);
+        });
+    };
+    if (aborted) {
+        this.aborted = true;
+        this.emit('aborted');
+    }
+    if (aborted && this.socket && !this.socket.destroyed) {
+        const socket = this.socket;
+        const onSocketFinished = () => {
+            socket.removeListener('error', onSocketFinished);
+            socket.removeListener('close', onSocketFinished);
+            finishDestroy();
+        };
+        socket.once('error', onSocketFinished);
+        socket.once('close', onSocketFinished);
+        this.socket.destroy(_err || undefined);
+        return;
+    }
+    finishDestroy();
 };
 
 // ===== Status code validation =====
@@ -220,9 +234,12 @@ function ServerResponse(req, options) {
     this._chunked = false;
     this._hasBody = true;
     this._keepAlive = false;
+    this._acceptOverflowRequest = false;
     this._keepAliveTimeout = 5000;
     this._keepAliveMaxRequests = 0;
+    this._last = false;
     this._sentContentLength = false;
+    this._header = null;
     this._headersSentWire = false;
     this._rejectNonStandardBodyWrites = !!(options && options.rejectNonStandardBodyWrites);
 
@@ -318,7 +335,7 @@ ServerResponse.prototype._implicitHeader = function _implicitHeader() {
 };
 
 ServerResponse.prototype.setHeader = function setHeader(name, value) {
-    if (this._headersSentWire) {
+    if (this.headersSent) {
         throw new ERR_HTTP_HEADERS_SENT('set');
     }
     if (typeof name !== 'string' || !/^[\x21-\x7e]+$/.test(name)) {
@@ -339,6 +356,10 @@ ServerResponse.prototype.setHeader = function setHeader(name, value) {
     const lower = name.toLowerCase();
     if (lower === 'connection') {
         this._removedConnection = false;
+    } else if (lower === 'content-length') {
+        this._removedContLen = false;
+    } else if (lower === 'transfer-encoding') {
+        this._removedTE = false;
     }
     this._headers[lower] = value;
     this._headerNames[lower] = name;
@@ -354,7 +375,7 @@ ServerResponse.prototype.hasHeader = function hasHeader(name) {
 };
 
 ServerResponse.prototype.removeHeader = function removeHeader(name) {
-    if (this._headersSentWire) {
+    if (this.headersSent) {
         throw new ERR_HTTP_HEADERS_SENT('remove');
     }
     const lower = name.toLowerCase();
@@ -366,6 +387,10 @@ ServerResponse.prototype.removeHeader = function removeHeader(name) {
         // re-added implicitly. The connection lifecycle is unchanged (HTTP/1.1
         // persists, HTTP/1.0 closes after the response).
         this._removedConnection = true;
+    } else if (lower === 'content-length') {
+        this._removedContLen = true;
+    } else if (lower === 'transfer-encoding') {
+        this._removedTE = true;
     }
     delete this._headers[lower];
     delete this._headerNames[lower];
@@ -499,13 +524,15 @@ ServerResponse.prototype.writeHead = function writeHead(statusCode, statusMessag
         }
     }
 
-    this.headersSent = true;
+    // Node commits both the serialized header and its private persistence
+    // decision at writeHead(). Keep the bytes buffered until the response is
+    // active, but reject and ignore subsequent header mutations immediately.
+    this._buildHeaderString();
     return this;
 };
 
 ServerResponse.prototype._buildHeaderString = function _buildHeaderString() {
-    if (this._headersSentWire) return '';
-    this._headersSentWire = true;
+    if (this._header !== null) return this._header;
     this.headersSent = true;
 
     const statusMessage = _validateStatusMessage(
@@ -538,7 +565,7 @@ ServerResponse.prototype._buildHeaderString = function _buildHeaderString() {
     } else if (this.hasHeader('transfer-encoding')) {
         const te = String(this.getHeader('transfer-encoding')).toLowerCase();
         this._chunked = te === 'chunked';
-    } else if (!isHeadRequest) {
+    } else if (!isHeadRequest && !this._removedTE) {
         // Neither Content-Length nor Transfer-Encoding set, body expected
         if (requestHttpVersion === '1.1') {
             this._chunked = true;
@@ -565,29 +592,44 @@ ServerResponse.prototype._buildHeaderString = function _buildHeaderString() {
 
     // Implicit Connection header (after user headers)
     const userConnection = this.getHeader('connection');
-    const userConnectionTokens = typeof userConnection === 'string'
-        ? userConnection.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean)
-        : [];
+    const userConnectionValues = Array.isArray(userConnection)
+        ? userConnection
+        : (userConnection === undefined ? [] : [userConnection]);
+    const userConnectionTokens = userConnectionValues.flatMap((value) =>
+        String(value).split(',').map((token) => token.trim().toLowerCase()).filter(Boolean)
+    );
     const userSaysClose = userConnectionTokens.includes('close');
-    const userSaysKeepAlive = userConnectionTokens.includes('keep-alive');
     const canKeepAlive = !!this._keepAlive;
-    // The user may narrow a keep-alive response to close, but must not widen
-    // a close response to keep-alive: header semantics must match the actual
-    // socket lifecycle decided elsewhere (maxRequestsPerSocket, server.close()).
-    const effectiveKeepAlive = userConnection === undefined
-        ? canKeepAlive
-        : (canKeepAlive && userSaysKeepAlive && !userSaysClose);
+    const canPersistForOverflow = !!this._acceptOverflowRequest;
+    const selfDelimited = !this._hasBody || this._sentContentLength || this._chunked;
+    const chunkedWithoutTerminator = isNoBodyStatus && this._chunked;
+
+    // Finalize the same private persistence decision that response completion
+    // consumes. maxRequestsPerSocket is the Node-compatible exception: its
+    // boundary response advertises close but remains able to serve a 503 for an
+    // already-arriving overflow request.
+    this._last =
+        !(canKeepAlive || canPersistForOverflow) ||
+        userSaysClose ||
+        chunkedWithoutTerminator ||
+        !selfDelimited;
+
+    // Explicit Keep-Alive is user-owned and suppresses automatic generation.
+    this._defaultKeepAlive = this.getHeader('keep-alive') === undefined;
+    const effectiveKeepAlive = canKeepAlive && !this._last;
 
     if (userConnection === undefined && !this._removedConnection) {
         head += 'Connection: ' + (effectiveKeepAlive ? 'keep-alive' : 'close') + '\r\n';
     }
 
-    if (effectiveKeepAlive && !this._removedConnection && this.getHeader('keep-alive') === undefined) {
-        const timeoutMs = typeof this._keepAliveTimeout === 'number' && this._keepAliveTimeout >= 0
-            ? this._keepAliveTimeout
-            : 5000;
-        if (timeoutMs > 0) {
-            const timeoutSeconds = Math.trunc(timeoutMs / 1000);
+    if (effectiveKeepAlive &&
+        userConnection === undefined &&
+        !this._removedConnection &&
+        this._defaultKeepAlive) {
+        const timeoutSeconds = this._keepAliveTimeout && typeof this._keepAliveTimeout === 'number'
+            ? Math.floor(this._keepAliveTimeout / 1000)
+            : undefined;
+        if (timeoutSeconds !== undefined) {
             head += 'Keep-Alive: timeout=' + timeoutSeconds;
             if (this._keepAliveMaxRequests > 0) {
                 head += ', max=' + this._keepAliveMaxRequests;
@@ -602,11 +644,14 @@ ServerResponse.prototype._buildHeaderString = function _buildHeaderString() {
     }
 
     head += '\r\n';
-    return head;
+    this._header = head;
+    return this._header;
 };
 
 ServerResponse.prototype._sendHeaders = function _sendHeaders() {
+    if (this._headersSentWire) return;
     const head = this._buildHeaderString();
+    this._headersSentWire = true;
     if (head) {
         this._writeOutput(Buffer.from(head));
     }
@@ -832,12 +877,17 @@ ServerResponse.prototype.end = function end(data, encoding, cb) {
     }
 
     if (!this._headersSentWire) {
-        if (data && !this.headersSent && !this.hasHeader('content-length') && !this.hasHeader('transfer-encoding')) {
+        if (data &&
+            !this.headersSent &&
+            !this._removedContLen &&
+            !this.hasHeader('content-length') &&
+            !this.hasHeader('transfer-encoding')) {
             // writeHead() was NOT called and full body is known at end-time:
             // set Content-Length and combine headers + body into a single write.
             const body = typeof data === 'string' ? Buffer.from(data, encoding || 'utf8') : Buffer.from(data);
             this.setHeader('Content-Length', body.length);
             const head = this._buildHeaderString();
+            this._headersSentWire = true;
             if (this._hasBody && head) {
                 const headerBuf = Buffer.from(head);
                 const combined = Buffer.concat([headerBuf, body]);
@@ -851,6 +901,7 @@ ServerResponse.prototype.end = function end(data, encoding, cb) {
             // letting chunked encoding handle the body (matches Node.js behavior).
             if (!data &&
                 !this.headersSent &&
+                !this._removedContLen &&
                 !this.hasHeader('content-length') &&
                 !this.hasHeader('transfer-encoding')) {
                 this.setHeader('Content-Length', 0);
@@ -1399,18 +1450,17 @@ function createConnectionParser(server, socket) {
                     // Set up finish handler for request sequencing
                     res.on('finish', function onFinish() {
                         context.responseFinished = true;
-                        const responseConnection = res.getHeader('connection');
-                        const responseCloses =
-                            typeof responseConnection === 'string' &&
-                            responseConnection
-                                .toLowerCase()
-                                .split(',')
-                                .some((token) => token.trim() === 'close');
                         context.shouldKeepAliveAfterResponse =
                             (res._keepAlive || res._acceptOverflowRequest) &&
                             !isDroppedRequest &&
-                            !responseCloses &&
+                            !res._last &&
                             !server._closeRequested;
+                        const resumeScheduled = req._readableState &&
+                            req._readableState.resumeScheduled;
+                        if (!req._consuming && !resumeScheduled &&
+                            typeof req._dump === 'function') {
+                            req._dump();
+                        }
                         maybeFinalizeResponse(context);
                     });
 

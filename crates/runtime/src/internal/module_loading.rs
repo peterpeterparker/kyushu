@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::hash::{BuildHasher, Hash, Hasher};
+use std::hash::BuildHasher;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1115,8 +1115,8 @@ fn process_import_attrs(
                     source,
                     import_start,
                     i,
-                    &dynamic_import_reaction_name,
-                    &dynamic_import_with_trace_name,
+                    dynamic_import_reaction_name,
+                    dynamic_import_with_trace_name,
                     module_path,
                     parent_filename_expression,
                     parent_url_expression,
@@ -1298,6 +1298,9 @@ fn unique_internal_name(source: &str, base: &str) -> String {
     name
 }
 
+// Keeping the parser coordinates and injected binding expressions explicit makes the
+// rewrite boundary easier to audit than grouping unrelated borrowed values together.
+#[allow(clippy::too_many_arguments)]
 fn rewrite_dynamic_import_call(
     source: &str,
     import_start: usize,
@@ -1912,11 +1915,7 @@ fn esm_preflight_error_module_source(
     raw_cjs_global_messages: bool,
 ) -> Option<String> {
     if package_type_module_js {
-        let cjs_global = find_bare_cjs_global_in_esm(source);
-        if cjs_global.is_none() {
-            return None;
-        }
-        let name = cjs_global.unwrap_or("module");
+        let name = find_bare_cjs_global_in_esm(source)?;
         let message = format!(
             "{name} is not defined in ES module scope. This file is being treated as an ES module because it has a .js file extension and package.json contains \"type\": \"module\". To treat it as a CommonJS script, rename it to use the '.cjs' file extension."
         );
@@ -1926,9 +1925,7 @@ fn esm_preflight_error_module_source(
         ));
     }
 
-    let Some(name) = find_bare_cjs_global_in_esm(source) else {
-        return None;
-    };
+    let name = find_bare_cjs_global_in_esm(source)?;
     let message = if raw_cjs_global_messages {
         match name {
             "require" => "require is not defined",
@@ -2823,11 +2820,13 @@ fn previous_significant_byte_before_method(source: &str, pos: usize) -> Option<u
         while end > 0 && bytes[end - 1].is_ascii_whitespace() {
             end -= 1;
         }
-        if end >= 2 && bytes[end - 2] == b'*' && bytes[end - 1] == b'/' {
-            if let Some(start) = source[..end - 2].rfind("/*") {
-                end = start;
-                continue;
-            }
+        if end >= 2
+            && bytes[end - 2] == b'*'
+            && bytes[end - 1] == b'/'
+            && let Some(start) = source[..end - 2].rfind("/*")
+        {
+            end = start;
+            continue;
         }
         return if end == 0 { None } else { Some(bytes[end - 1]) };
     }
@@ -3042,14 +3041,13 @@ fn has_cjs_wrapper_lexical_redeclaration(source: &str) -> bool {
                         return ControlFlow::Break(());
                     }
                 }
-            } else if let Some((bindings, _)) = parse_class_declaration_span(source, i) {
-                if bindings
+            } else if let Some((bindings, _)) = parse_class_declaration_span(source, i)
+                && bindings
                     .iter()
                     .any(|binding| CJS_GLOBAL_NAMES.contains(&binding.as_str()))
-                {
-                    found = true;
-                    return ControlFlow::Break(());
-                }
+            {
+                found = true;
+                return ControlFlow::Break(());
             }
         }
         ControlFlow::Continue(None)
@@ -3133,9 +3131,7 @@ impl FileUrlResolver {
 
     fn file_url_path_and_suffix(url: &str) -> Option<(&str, &str)> {
         let encoded = url.strip_prefix("file://")?;
-        let end = encoded
-            .find(|ch| ch == '?' || ch == '#')
-            .unwrap_or(encoded.len());
+        let end = encoded.find(['?', '#']).unwrap_or(encoded.len());
         let encoded_path = &encoded[..end];
         let (host, path) = if encoded_path.starts_with('/') {
             ("", encoded_path)
@@ -3208,9 +3204,7 @@ impl FileUrlResolver {
 impl Resolver for FileUrlResolver {
     fn resolve<'js>(&mut self, ctx: &Ctx<'js>, base: &str, name: &str, _attributes: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
         if let Some(encoded) = name.strip_prefix("file://") {
-            let end = encoded
-                .find(|ch| ch == '?' || ch == '#')
-                .unwrap_or(encoded.len());
+            let end = encoded.find(['?', '#']).unwrap_or(encoded.len());
             if NodeFileResolver::has_encoded_path_separator(&encoded[..end]) {
                 return NodeFileResolver::throw_invalid_encoded_separator(ctx, base, name);
             }
@@ -3225,7 +3219,7 @@ impl Resolver for FileUrlResolver {
         if let Some((path, suffix)) = Self::file_url_to_path_parts(name) {
             let normalized = CjsEvalResolver::normalize_path(std::path::Path::new(&path));
             let url = NodeFileResolver::module_url_for_file_specifier(name);
-            if NodeFileResolver::module_resolution_is_dir(ctx, &normalized) {
+            if NodeFileResolver::module_resolution_is_dir(&normalized) {
                 discard_import_type_rewrite_token(name);
                 return NodeFileResolver::throw_module_resolution_error(
                     ctx,
@@ -3239,7 +3233,7 @@ impl Resolver for FileUrlResolver {
                     url,
                 );
             }
-            if !NodeFileResolver::module_resolution_is_file(ctx, &normalized) {
+            if !NodeFileResolver::module_resolution_is_file(&normalized) {
                 discard_import_type_rewrite_token(name);
                 return NodeFileResolver::throw_module_resolution_error(
                     ctx,
@@ -3664,24 +3658,16 @@ impl NodeFileResolver {
         if preserve_symlinks {
             return normalized.to_string();
         }
-        let realpath_input = crate::builtin::realpath_for_module_resolution(ctx, normalized)
-            .unwrap_or_else(|| normalized.to_string());
-        std::fs::canonicalize(&realpath_input)
-            .map(|path| CjsEvalResolver::normalize_path(&path))
-            .unwrap_or(realpath_input)
-    }
-
-    fn module_resolution_path(ctx: &Ctx<'_>, normalized: &str) -> String {
         crate::builtin::realpath_for_module_resolution(ctx, normalized)
             .unwrap_or_else(|| normalized.to_string())
     }
 
-    fn module_resolution_is_file(ctx: &Ctx<'_>, normalized: &str) -> bool {
-        std::path::Path::new(&Self::module_resolution_path(ctx, normalized)).is_file()
+    fn module_resolution_is_file(normalized: &str) -> bool {
+        std::path::Path::new(normalized).is_file()
     }
 
-    fn module_resolution_is_dir(ctx: &Ctx<'_>, normalized: &str) -> bool {
-        std::path::Path::new(&Self::module_resolution_path(ctx, normalized)).is_dir()
+    fn module_resolution_is_dir(normalized: &str) -> bool {
+        std::path::Path::new(normalized).is_dir()
     }
 
     fn resolve_candidate(
@@ -3729,14 +3715,12 @@ impl NodeFileResolver {
     }
 
     fn candidate_is_file(
-        ctx: &Ctx<'_>,
+        _ctx: &Ctx<'_>,
         normalized: &str,
         semantics: FileCandidateSemantics,
     ) -> bool {
         match semantics {
-            FileCandidateSemantics::ModuleResolution => {
-                Self::module_resolution_is_file(ctx, normalized)
-            }
+            FileCandidateSemantics::ModuleResolution => Self::module_resolution_is_file(normalized),
             FileCandidateSemantics::DirectFilesystem => std::path::Path::new(normalized).is_file(),
         }
     }
@@ -3822,14 +3806,13 @@ impl NodeFileResolver {
                 &package_json_path,
                 &resolution,
             ) && let Some(main) = package.main.as_deref()
-            {
-                if let Some((suggestion, _)) = NodeModulesResolver::resolve_package_legacy_main(
+                && let Some((suggestion, _)) = NodeModulesResolver::resolve_package_legacy_main(
                     std::path::Path::new(normalized_dir),
                     main,
                     &mut resolution,
-                ) {
-                    message.push_str(&format!("\nDid you mean to import \"{suggestion}\"?"));
-                }
+                )
+            {
+                message.push_str(&format!("\nDid you mean to import \"{suggestion}\"?"));
             }
         }
         message
@@ -4029,6 +4012,8 @@ enum PackageTargetResolution {
     NoMatch,
     Blocked,
 }
+
+type PackageMapTargetMatch<'a> = (&'a PackageTarget, Option<String>, Option<&'a str>);
 
 struct PackageTargetResolveContext<'a> {
     package_dir: &'a std::path::Path,
@@ -4230,7 +4215,6 @@ struct NodePackageResolutionContext<'a, 'w> {
     conditions: &'a [String],
     warnings: &'w mut Vec<NodePackageWarning>,
     file_probe_cache: HashMap<String, bool>,
-    emulated_symlinks: HashMap<String, String>,
     package_json_cache: PackageJsonCache,
 }
 
@@ -4241,13 +4225,6 @@ impl<'a, 'w> NodePackageResolutionContext<'a, 'w> {
         conditions: &'a [String],
         warnings: &'w mut Vec<NodePackageWarning>,
     ) -> Self {
-        let emulated_symlinks = ctx
-            .userdata::<crate::internal::runtime_services::RuntimeServices>()
-            .expect("runtime services not initialized")
-            .fs
-            .borrow()
-            .emulated_symlinks
-            .clone();
         let package_json_cache = ctx
             .userdata::<crate::internal::runtime_services::RuntimeServices>()
             .expect("runtime services not initialized")
@@ -4258,7 +4235,6 @@ impl<'a, 'w> NodePackageResolutionContext<'a, 'w> {
             conditions,
             warnings,
             file_probe_cache: HashMap::new(),
-            emulated_symlinks,
             package_json_cache,
         }
     }
@@ -4267,12 +4243,7 @@ impl<'a, 'w> NodePackageResolutionContext<'a, 'w> {
         if let Some(cached) = self.file_probe_cache.get(normalized) {
             return *cached;
         }
-        let fs_path = crate::builtin::realpath_for_module_resolution_with_symlinks(
-            &self.emulated_symlinks,
-            normalized,
-        )
-        .unwrap_or_else(|| normalized.to_string());
-        let is_file = std::path::Path::new(&fs_path).is_file();
+        let is_file = std::path::Path::new(normalized).is_file();
         self.file_probe_cache
             .insert(normalized.to_string(), is_file);
         is_file
@@ -4284,13 +4255,7 @@ impl<'a, 'w> NodePackageResolutionContext<'a, 'w> {
     }
 
     fn is_dir(&self, path: &std::path::Path) -> bool {
-        let normalized = CjsEvalResolver::normalize_path(path);
-        let fs_path = crate::builtin::realpath_for_module_resolution_with_symlinks(
-            &self.emulated_symlinks,
-            &normalized,
-        )
-        .unwrap_or(normalized);
-        std::path::Path::new(&fs_path).is_dir()
+        path.is_dir()
     }
 
     fn with_mode<T>(
@@ -4329,19 +4294,6 @@ enum CjsAnalysisProbe {
 }
 
 impl NodeModulesResolver {
-    fn module_resolution_path(
-        path: &std::path::Path,
-        resolution: &NodePackageResolutionContext<'_, '_>,
-    ) -> std::path::PathBuf {
-        let normalized = CjsEvalResolver::normalize_path(path);
-        crate::builtin::realpath_for_module_resolution_with_symlinks(
-            &resolution.emulated_symlinks,
-            &normalized,
-        )
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| path.to_path_buf())
-    }
-
     fn try_resolve_with_context(
         &self,
         base: &str,
@@ -4379,8 +4331,8 @@ impl NodeModulesResolver {
                 && dir.file_name().is_some_and(|name| name == "node_modules");
             if !skip_nested_node_modules {
                 let package_path = dir.join("node_modules").join(package_name);
-                if Self::module_resolution_path(&package_path, resolution).is_dir() {
-                    if let Some(resolved) = Self::try_resolve_package_directory(
+                if package_path.is_dir()
+                    && let Some(resolved) = Self::try_resolve_package_directory(
                         base,
                         name,
                         package_name,
@@ -4388,9 +4340,9 @@ impl NodeModulesResolver {
                         package_root_trailing_slash,
                         &package_path,
                         resolution,
-                    )? {
-                        return Ok(Some(resolved));
-                    }
+                    )?
+                {
+                    return Ok(Some(resolved));
                 }
 
                 if resolution.mode.probes_missing_package_root_file()
@@ -4422,23 +4374,22 @@ impl NodeModulesResolver {
         let pkg_path = package_path.join("package.json");
         let package = Self::read_package_json_optional_with_context(&pkg_path, resolution)?;
 
-        if let Some(package) = package.as_ref() {
-            if let Some(exports_field) = package
+        if let Some(package) = package.as_ref()
+            && let Some(exports_field) = package
                 .exports
                 .as_ref()
                 .filter(|exports| Self::is_active_package_exports(exports))
-            {
-                Self::validate_package_exports_map(&pkg_path, exports_field)?;
-                return Self::resolve_package_exports(
-                    package_name,
-                    package_path,
-                    exports_field,
-                    subpath,
-                    resolution,
-                    resolution.mode.package_exports_importer(base),
-                )
-                .map(Some);
-            }
+        {
+            Self::validate_package_exports_map(&pkg_path, exports_field)?;
+            return Self::resolve_package_exports(
+                package_name,
+                package_path,
+                exports_field,
+                subpath,
+                resolution,
+                resolution.mode.package_exports_importer(base),
+            )
+            .map(Some);
         }
 
         match resolution.mode {
@@ -4477,8 +4428,7 @@ impl NodeModulesResolver {
         if let Some(cached) = resolution.package_json_cache.get(&cache_key) {
             return Ok(Some(cached));
         }
-        let read_path = Self::module_resolution_path(pkg_path, resolution);
-        match std::fs::read_to_string(&read_path) {
+        match std::fs::read_to_string(pkg_path) {
             Ok(pkg_content) => {
                 let package = Rc::new(serde_json::from_str::<PackageJson>(&pkg_content).map_err(
                     |_| NodePackageResolveError::InvalidPackageConfig {
@@ -5197,31 +5147,31 @@ impl NodeModulesResolver {
             );
         }
 
-        if let PackageTarget::Object(map) = exports {
-            if let Some((target, pattern_substitution, pattern_key)) =
+        if let PackageTarget::Object(map) = exports
+            && let Some((target, pattern_substitution, pattern_key)) =
                 Self::find_package_map_target(map, &key, "is not a valid match in pattern")?
-            {
-                let ctx = PackageTargetResolveContext {
-                    package_dir,
-                    allow_bare_target: false,
-                    nested_bare_target_resolution_mode: NodePackageResolveMode::EsmImport,
-                    kind: "exports",
-                    conditions: resolution.conditions,
-                    pattern_substitution: pattern_substitution.as_deref(),
-                    warning_specifier: &key,
-                    warning_pattern_key: pattern_key,
-                    warning_importer: importer,
-                };
-                return Self::resolve_package_target_with_context(target, ctx, resolution)
-                    .and_then(|resolution| {
-                        Self::target_resolution_to_export_result(
-                            resolution,
-                            package_name,
-                            subpath,
-                            false,
-                        )
-                    });
-            }
+        {
+            let ctx = PackageTargetResolveContext {
+                package_dir,
+                allow_bare_target: false,
+                nested_bare_target_resolution_mode: NodePackageResolveMode::EsmImport,
+                kind: "exports",
+                conditions: resolution.conditions,
+                pattern_substitution: pattern_substitution.as_deref(),
+                warning_specifier: &key,
+                warning_pattern_key: pattern_key,
+                warning_importer: importer,
+            };
+            return Self::resolve_package_target_with_context(target, ctx, resolution).and_then(
+                |resolution| {
+                    Self::target_resolution_to_export_result(
+                        resolution,
+                        package_name,
+                        subpath,
+                        false,
+                    )
+                },
+            );
         }
 
         Err(NodePackageResolveError::PackagePathNotExported {
@@ -5238,37 +5188,37 @@ impl NodeModulesResolver {
         resolution: &mut NodePackageResolutionContext<'_, '_>,
         importer: Option<&str>,
     ) -> Result<String, NodePackageResolveError> {
-        if let PackageTarget::Object(map) = imports {
-            if let Some((target, pattern_substitution, pattern_key)) =
+        if let PackageTarget::Object(map) = imports
+            && let Some((target, pattern_substitution, pattern_key)) =
                 Self::find_package_map_target(
                     map,
                     specifier,
                     "request is not a valid match in pattern",
                 )?
-            {
-                let ctx = PackageTargetResolveContext {
-                    package_dir,
-                    allow_bare_target: true,
-                    // Bare targets inside package imports are resolved with ESM package
-                    // fallback rules even when the surrounding caller is CJS export analysis.
-                    nested_bare_target_resolution_mode: NodePackageResolveMode::EsmImport,
-                    kind: "imports",
-                    conditions: resolution.conditions,
-                    pattern_substitution: pattern_substitution.as_deref(),
-                    warning_specifier: specifier,
-                    warning_pattern_key: pattern_key,
-                    warning_importer: importer,
-                };
-                return Self::resolve_package_target_with_context(target, ctx, resolution)
-                    .and_then(|resolution| {
-                        Self::target_resolution_to_import_result(
-                            resolution,
-                            specifier,
-                            package_dir,
-                            importer,
-                        )
-                    });
-            }
+        {
+            let ctx = PackageTargetResolveContext {
+                package_dir,
+                allow_bare_target: true,
+                // Bare targets inside package imports are resolved with ESM package
+                // fallback rules even when the surrounding caller is CJS export analysis.
+                nested_bare_target_resolution_mode: NodePackageResolveMode::EsmImport,
+                kind: "imports",
+                conditions: resolution.conditions,
+                pattern_substitution: pattern_substitution.as_deref(),
+                warning_specifier: specifier,
+                warning_pattern_key: pattern_key,
+                warning_importer: importer,
+            };
+            return Self::resolve_package_target_with_context(target, ctx, resolution).and_then(
+                |resolution| {
+                    Self::target_resolution_to_import_result(
+                        resolution,
+                        specifier,
+                        package_dir,
+                        importer,
+                    )
+                },
+            );
         }
         Err(NodePackageResolveError::PackageImportNotDefined {
             specifier: specifier.to_string(),
@@ -5332,43 +5282,26 @@ impl NodeModulesResolver {
         resolution: &mut NodePackageResolutionContext<'_, '_>,
     ) -> Result<PackageTargetResolution, NodePackageResolveError> {
         match target {
-            PackageTarget::Null => {
-                return Ok(PackageTargetResolution::Blocked);
-            }
-            PackageTarget::Bool(false) => {
-                return Err(NodePackageResolveError::InvalidPackageTarget {
-                    kind: ctx.kind,
-                    target: "false".to_string(),
-                });
-            }
-            PackageTarget::Bool(true) => {
-                return Err(NodePackageResolveError::InvalidPackageTarget {
-                    kind: ctx.kind,
-                    target: "true".to_string(),
-                });
-            }
-            PackageTarget::Invalid(value) => {
-                return Err(NodePackageResolveError::InvalidPackageTarget {
-                    kind: ctx.kind,
-                    target: value.to_string(),
-                });
-            }
+            PackageTarget::Null => Ok(PackageTargetResolution::Blocked),
+            PackageTarget::Bool(false) => Err(NodePackageResolveError::InvalidPackageTarget {
+                kind: ctx.kind,
+                target: "false".to_string(),
+            }),
+            PackageTarget::Bool(true) => Err(NodePackageResolveError::InvalidPackageTarget {
+                kind: ctx.kind,
+                target: "true".to_string(),
+            }),
+            PackageTarget::Invalid(value) => Err(NodePackageResolveError::InvalidPackageTarget {
+                kind: ctx.kind,
+                target: value.to_string(),
+            }),
             PackageTarget::String(target_str) => {
                 let target_str = if let Some(pattern_substitution) = ctx.pattern_substitution {
                     target_str.replace('*', pattern_substitution)
                 } else {
                     target_str.clone()
                 };
-                Self::push_package_deprecation_warning(
-                    resolution.warnings,
-                    ctx.package_dir,
-                    ctx.kind,
-                    ctx.warning_specifier,
-                    &target_str,
-                    ctx.pattern_substitution,
-                    ctx.warning_pattern_key,
-                    ctx.warning_importer,
-                );
+                Self::push_package_deprecation_warning(resolution.warnings, ctx, &target_str);
                 if ctx.allow_bare_target && Self::is_bare_package_specifier(&target_str) {
                     let base = ctx.package_dir.join("package.json");
                     let base_str = base.to_string_lossy();
@@ -5420,9 +5353,9 @@ impl NodeModulesResolver {
                         request: candidate.to_string_lossy().into_owned(),
                     });
                 }
-                return Err(NodePackageResolveError::ModuleNotFound {
+                Err(NodePackageResolveError::ModuleNotFound {
                     request: candidate.to_string_lossy().into_owned(),
-                });
+                })
             }
             PackageTarget::Array(array) => {
                 if array.is_empty() {
@@ -5453,7 +5386,7 @@ impl NodeModulesResolver {
                 if last_fallback_was_blocked {
                     return Ok(PackageTargetResolution::Blocked);
                 }
-                return Ok(PackageTargetResolution::NoMatch);
+                Ok(PackageTargetResolution::NoMatch)
             }
             PackageTarget::Object(map) => {
                 if map.keys().any(|key| Self::is_array_index(key)) {
@@ -5568,8 +5501,7 @@ impl NodeModulesResolver {
         map: &'a IndexMap<String, PackageTarget>,
         specifier: &str,
         invalid_pattern_message: &str,
-    ) -> Result<Option<(&'a PackageTarget, Option<String>, Option<&'a str>)>, NodePackageResolveError>
-    {
+    ) -> Result<Option<PackageMapTargetMatch<'a>>, NodePackageResolveError> {
         if let Some(target) = map.get(specifier) {
             return Ok(Some((target, None, None)));
         }
@@ -5733,67 +5665,71 @@ impl NodeModulesResolver {
 
     fn push_package_deprecation_warning(
         warnings: &mut Vec<NodePackageWarning>,
-        package_dir: &std::path::Path,
-        kind: &str,
-        specifier: &str,
+        ctx: &PackageTargetResolveContext<'_>,
         target: &str,
-        pattern_substitution: Option<&str>,
-        pattern_key: Option<&str>,
-        importer: Option<&str>,
     ) {
-        if kind == "exports"
-            && pattern_substitution.is_some_and(|substitution| substitution.ends_with('/'))
+        if ctx.kind == "exports"
+            && ctx
+                .pattern_substitution
+                .is_some_and(|substitution| substitution.ends_with('/'))
         {
-            let location = Self::package_warning_location(package_dir, kind, importer);
+            let location =
+                Self::package_warning_location(ctx.package_dir, ctx.kind, ctx.warning_importer);
             warnings.push(NodePackageWarning {
                 message: format!(
                     "Use of deprecated trailing slash pattern mapping {:?}{} Mapping specifiers ending in \"/\" is no longer supported.",
-                    specifier, location
+                    ctx.warning_specifier, location
                 ),
                 code: "DEP0155",
                 dedupe_key: Some(format!(
                     "{}:{}",
-                    package_dir.to_string_lossy(),
-                    specifier
+                    ctx.package_dir.to_string_lossy(),
+                    ctx.warning_specifier
                 )),
             });
             return;
         }
         if Self::has_deprecated_double_slash(target) {
-            let location = Self::package_warning_location(package_dir, kind, importer);
-            let matched_pattern = pattern_key
+            let location =
+                Self::package_warning_location(ctx.package_dir, ctx.kind, ctx.warning_importer);
+            let matched_pattern = ctx
+                .warning_pattern_key
                 .map(|pattern_key| format!(" matched to {:?}", pattern_key))
                 .unwrap_or_default();
             warnings.push(NodePackageWarning {
                 message: format!(
                     "Use of deprecated double slash resolving {:?} for module request {:?}{}{}",
-                    target, specifier, matched_pattern, location
+                    target, ctx.warning_specifier, matched_pattern, location
                 ),
                 code: "DEP0166",
                 dedupe_key: None,
             });
-        } else if Self::has_deprecated_leading_or_trailing_slash(pattern_substitution) {
-            let location = Self::package_warning_location(package_dir, kind, importer);
-            let matched_pattern = pattern_key
+        } else if Self::has_deprecated_leading_or_trailing_slash(ctx.pattern_substitution) {
+            let location =
+                Self::package_warning_location(ctx.package_dir, ctx.kind, ctx.warning_importer);
+            let matched_pattern = ctx
+                .warning_pattern_key
                 .map(|pattern_key| format!(" matched to {:?}", pattern_key))
                 .unwrap_or_default();
             warnings.push(NodePackageWarning {
                 message: format!(
                     "Use of deprecated leading or trailing slash matching resolving {:?} for module request {:?}{}{}",
-                    target, specifier, matched_pattern, location
+                    target, ctx.warning_specifier, matched_pattern, location
                 ),
                 code: "DEP0166",
                 dedupe_key: None,
             });
-        } else if Self::has_deprecated_double_slash(specifier) {
-            let location = Self::package_warning_location(package_dir, kind, importer);
-            let matched_pattern = pattern_key
+        } else if Self::has_deprecated_double_slash(ctx.warning_specifier) {
+            let location =
+                Self::package_warning_location(ctx.package_dir, ctx.kind, ctx.warning_importer);
+            let matched_pattern = ctx
+                .warning_pattern_key
                 .map(|pattern_key| format!(" matched to {:?}", pattern_key))
                 .unwrap_or_default();
             warnings.push(NodePackageWarning {
                 message: format!(
                     "Use of deprecated double slash resolving {:?} for module request {:?}{}{}",
-                    target, specifier, matched_pattern, location
+                    target, ctx.warning_specifier, matched_pattern, location
                 ),
                 code: "DEP0166",
                 dedupe_key: None,
@@ -6479,7 +6415,7 @@ fn import_meta_trailing_slash_package_has_exports(
     package_name: &str,
 ) -> Result<bool, NodePackageResolveError> {
     let mut warnings = Vec::new();
-    let mut resolution = NodePackageResolutionContext::new(
+    let resolution = NodePackageResolutionContext::new(
         ctx,
         NodePackageResolveMode::EsmImport,
         &[],
@@ -6496,10 +6432,9 @@ fn import_meta_trailing_slash_package_has_exports(
         }
 
         let pkg_path = dir.join("package.json");
-        if let Some(package) = NodeModulesResolver::read_package_json_optional_with_context(
-            &pkg_path,
-            &mut resolution,
-        )? {
+        if let Some(package) =
+            NodeModulesResolver::read_package_json_optional_with_context(&pkg_path, &resolution)?
+        {
             if package.name.as_deref() == Some(package_name) {
                 return Ok(package.exports.as_ref().is_some_and(|exports| {
                     NodeModulesResolver::is_active_package_exports(exports)
@@ -6516,11 +6451,11 @@ fn import_meta_trailing_slash_package_has_exports(
     let mut dir = base_dir.to_path_buf();
     loop {
         let package_path = dir.join("node_modules").join(package_name);
-        if NodeModulesResolver::module_resolution_path(&package_path, &resolution).is_dir() {
+        if package_path.is_dir() {
             let pkg_path = package_path.join("package.json");
             return NodeModulesResolver::read_package_json_optional_with_context(
                 &pkg_path,
-                &mut resolution,
+                &resolution,
             )
             .map(|package| {
                 package.is_some_and(|package| {
@@ -6602,6 +6537,47 @@ fn is_typescript_module_path(path: &str) -> bool {
 }
 
 #[cfg(feature = "typescript-runtime")]
+struct CachedCjsTypeScriptAnalysis {
+    prepared_source: Option<String>,
+    export_names: Option<Vec<String>>,
+}
+
+#[cfg(feature = "typescript-runtime")]
+fn cached_cjs_typescript_analysis_for_filename(
+    ctx: &Ctx<'_>,
+    filename: &str,
+    source: &str,
+) -> rquickjs::Result<Option<CachedCjsTypeScriptAnalysis>> {
+    let get_analysis: Function = ctx
+        .globals()
+        .get("__wasm_rquickjs_get_cached_cjs_typescript_analysis")?;
+    let Some(value) = get_analysis.call::<_, Option<Object>>((filename, source))? else {
+        return Ok(None);
+    };
+    Ok(Some(CachedCjsTypeScriptAnalysis {
+        prepared_source: value.get("preparedSource")?,
+        export_names: value.get("exportNames")?,
+    }))
+}
+
+#[cfg(feature = "typescript-runtime")]
+fn cache_cjs_typescript_export_names_for_filename(
+    ctx: &Ctx<'_>,
+    filename: &str,
+    source: &str,
+    names: &[String],
+) -> rquickjs::Result<()> {
+    let value = rquickjs::Array::new(ctx.clone())?;
+    for (index, name) in names.iter().enumerate() {
+        value.set(index, name.clone())?;
+    }
+    let set_names: Function = ctx
+        .globals()
+        .get("__wasm_rquickjs_set_cached_cjs_typescript_export_names")?;
+    set_names.call((filename, value, source))
+}
+
+#[cfg(feature = "typescript-runtime")]
 fn transform_typescript_module_source<'js>(
     ctx: &Ctx<'js>,
     fs_path: &str,
@@ -6620,7 +6596,10 @@ fn transform_typescript_module_source<'js>(
             _ => None,
         },
     ) {
-        Ok(output) => Ok(output.code),
+        Ok(output) => {
+            record_typescript_module_transform(ctx)?;
+            Ok(output.code)
+        }
         Err(error) => {
             let constructor_name = match error.kind {
                 crate::internal::typescript::TypeScriptErrorKind::Error => "Error",
@@ -6632,6 +6611,32 @@ fn transform_typescript_module_source<'js>(
             Err(ctx.throw(object.into_value()))
         }
     }
+}
+
+#[cfg(feature = "typescript-runtime")]
+fn record_typescript_module_transform(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    #[cfg(feature = "test-observability")]
+    {
+        let record: Function = ctx
+            .globals()
+            .get("__wasm_rquickjs_record_typescript_module_transform")?;
+        record.call::<_, ()>(())?;
+    }
+    #[cfg(not(feature = "test-observability"))]
+    let _ = ctx;
+    Ok(())
+}
+
+fn record_commonjs_export_analysis(ctx: &Ctx<'_>) {
+    #[cfg(feature = "test-observability")]
+    if let Ok(record) = ctx
+        .globals()
+        .get::<_, Function>("__wasm_rquickjs_record_commonjs_export_analysis")
+    {
+        let _ = record.call::<_, ()>(());
+    }
+    #[cfg(not(feature = "test-observability"))]
+    let _ = ctx;
 }
 
 #[derive(Default)]
@@ -7495,9 +7500,7 @@ fn parse_export_star_reexport(source: &str, pos: usize) -> Option<(String, usize
                     return None;
                 }
                 i = skip_ws_comments(source, i + 1);
-                let Some((member_start, member_end)) = read_ident_span(source, i) else {
-                    return None;
-                };
+                let (member_start, member_end) = read_ident_span(source, i)?;
                 let member = &source[member_start..member_end];
                 if member == "__exportStar" || member == "__export" {
                     return Some(member_end);
@@ -7609,13 +7612,12 @@ fn named_export_object_literal_value(
     pos: usize,
     object_end: usize,
 ) -> Option<ObjectLiteralValueExport> {
-    let Some((ident, mut next)) = read_ident(source, pos) else {
-        return None;
-    };
+    let (ident, mut next) = read_ident(source, pos)?;
     next = skip_ws_comments(source, next);
-    if next >= object_end || source.as_bytes()[next] == b',' {
-        Some(ObjectLiteralValueExport::NamedContinue)
-    } else if matches!(ident.as_str(), "true" | "false" | "null" | "undefined") {
+    if next >= object_end
+        || source.as_bytes()[next] == b','
+        || matches!(ident.as_str(), "true" | "false" | "null" | "undefined")
+    {
         Some(ObjectLiteralValueExport::NamedContinue)
     } else {
         Some(ObjectLiteralValueExport::NamedStop)
@@ -8032,10 +8034,10 @@ fn parse_negated_exports_has_own_key(source: &str, pos: usize, key: &str) -> Opt
     let mut i = skip_ws_comments(source, pos + 1);
 
     let (receiver, next) = read_ident(source, i)?;
-    if receiver == "Object" {
-        if let Some((_, next)) = parse_object_has_own_property_call(source, i, key, false) {
-            return Some(next);
-        }
+    if receiver == "Object"
+        && let Some((_, next)) = parse_object_has_own_property_call(source, i, key, false)
+    {
+        return Some(next);
     }
 
     {
@@ -8048,7 +8050,7 @@ fn parse_negated_exports_has_own_key(source: &str, pos: usize, key: &str) -> Opt
         if i >= bytes.len() || bytes[i] != b')' {
             return None;
         }
-        return Some(i + 1);
+        Some(i + 1)
     }
 }
 
@@ -8161,9 +8163,7 @@ fn parse_define_property_reexport(
         return None;
     }
     i = skip_ws_comments(source, i + 1);
-    let Some(key_end) = parse_free_ident_name(source, i, key) else {
-        return None;
-    };
+    let key_end = parse_free_ident_name(source, i, key)?;
     i = skip_ws_comments(source, key_end);
     if i >= bytes.len() || bytes[i] != b',' {
         return None;
@@ -8171,7 +8171,7 @@ fn parse_define_property_reexport(
     let descriptor_start = i + 1;
     let end = find_matching_paren(source, pos)?;
     let descriptor = &source[descriptor_start..end];
-    if descriptor_getter_returns_binding_key(descriptor, binding, &key) {
+    if descriptor_getter_returns_binding_key(descriptor, binding, key) {
         Some(end + 1)
     } else {
         None
@@ -8672,12 +8672,25 @@ fn canonical_cjs_analysis_path(ctx: &Ctx<'_>, path: &str) -> String {
     crate::builtin::realpath_for_module_resolution(ctx, path).unwrap_or_else(|| path.to_string())
 }
 
+#[derive(Clone)]
+struct PreparedCjsTypeScript {
+    original_source: String,
+    prepared_source: String,
+    export_names: Vec<String>,
+}
+
+// Ephemeral ownership transfer for one CommonJS load transaction. Entries carry
+// already-transformed source from Rust analysis into JavaScript execution; they
+// are consumed and cleared rather than retained as a filesystem cache.
+type PreparedCjsTypeScriptGraph = HashMap<String, PreparedCjsTypeScript>;
+
 fn analyze_cjs_reexport_specifier_names(
     ctx: &Ctx<'_>,
     filename: &str,
     reexport_specifiers: Vec<String>,
     seen: &mut HashSet<String>,
     conditions: &[String],
+    mut prepared_typescript: Option<&mut PreparedCjsTypeScriptGraph>,
 ) -> Vec<String> {
     let mut names = Vec::new();
     for reexport in reexport_specifiers {
@@ -8685,37 +8698,114 @@ fn analyze_cjs_reexport_specifier_names(
             && let physical_path = canonical_cjs_analysis_path(ctx, &logical_path)
             && !seen.contains(&physical_path)
             && is_cjs_analysis_source_path(&physical_path)
-            && let Ok(source) = std::fs::read_to_string(&physical_path)
         {
-            #[cfg(feature = "typescript-runtime")]
-            let source = if is_typescript_module_path(&physical_path) {
-                let Ok(output) = crate::internal::typescript::transform_module(
-                    source,
-                    &physical_path,
-                    false,
-                    match std::path::Path::new(&physical_path)
-                        .extension()
-                        .and_then(|extension| extension.to_str())
-                    {
-                        Some("mts") => Some(true),
-                        Some("cts") => Some(false),
-                        _ => None,
-                    },
-                ) else {
-                    continue;
-                };
-                output.code
-            } else {
-                source
-            };
             let child_filename = if NodeFileResolver::has_exec_argv_flag(ctx, "--preserve-symlinks")
             {
                 logical_path
             } else {
                 physical_path
             };
-            let child =
-                analyze_cjs_exports_for_file(ctx, &child_filename, &source, seen, conditions);
+            let Ok(source) = std::fs::read_to_string(&child_filename) else {
+                continue;
+            };
+            #[cfg(feature = "typescript-runtime")]
+            let original_source_for_cache = source.clone();
+            #[cfg(feature = "typescript-runtime")]
+            let cached_typescript_analysis = if is_typescript_module_path(&child_filename) {
+                cached_cjs_typescript_analysis_for_filename(ctx, &child_filename, &source)
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
+            #[cfg(feature = "typescript-runtime")]
+            if let Some(exports) = cached_typescript_analysis
+                .as_ref()
+                .and_then(|cached| cached.export_names.clone())
+            {
+                for name in exports {
+                    add_unique(&mut names, name);
+                }
+                continue;
+            }
+            #[cfg(feature = "typescript-runtime")]
+            let cached_prepared_source =
+                cached_typescript_analysis.and_then(|cached| cached.prepared_source);
+            #[cfg(feature = "typescript-runtime")]
+            let had_cached_prepared_source = cached_prepared_source.is_some();
+            #[cfg(feature = "typescript-runtime")]
+            let source = if is_typescript_module_path(&child_filename) {
+                if !had_cached_prepared_source
+                    && typescript_module_path_is_esm(
+                        &child_filename,
+                        &source,
+                        package_scope_type(ctx, &child_filename).as_deref(),
+                    )
+                {
+                    continue;
+                }
+                if let Some(prepared) = prepared_typescript
+                    .as_deref()
+                    .and_then(|graph| graph.get(&child_filename))
+                {
+                    prepared.prepared_source.clone()
+                } else if let Some(cached) = cached_prepared_source {
+                    cached
+                } else {
+                    let original_source = source;
+                    let Ok(output) = crate::internal::typescript::transform_module(
+                        original_source.clone(),
+                        &child_filename,
+                        false,
+                        match std::path::Path::new(&child_filename)
+                            .extension()
+                            .and_then(|extension| extension.to_str())
+                        {
+                            Some("mts") => Some(true),
+                            Some("cts") => Some(false),
+                            _ => None,
+                        },
+                    ) else {
+                        continue;
+                    };
+                    if let Some(graph) = prepared_typescript.as_deref_mut() {
+                        let _ = record_typescript_module_transform(ctx);
+                        graph.insert(
+                            child_filename.clone(),
+                            PreparedCjsTypeScript {
+                                original_source,
+                                prepared_source: output.code.clone(),
+                                export_names: Vec::new(),
+                            },
+                        );
+                    }
+                    output.code
+                }
+            } else {
+                source
+            };
+            let child = analyze_cjs_exports_for_file_impl(
+                ctx,
+                &child_filename,
+                &source,
+                seen,
+                conditions,
+                prepared_typescript.as_deref_mut(),
+            );
+            if let Some(graph) = prepared_typescript.as_deref_mut()
+                && let Some(prepared) = graph.get_mut(&child_filename)
+            {
+                prepared.export_names = child.exports.clone();
+            }
+            #[cfg(feature = "typescript-runtime")]
+            if had_cached_prepared_source {
+                let _ = cache_cjs_typescript_export_names_for_filename(
+                    ctx,
+                    &child_filename,
+                    &original_source_for_cache,
+                    &child.exports,
+                );
+            }
             for name in child.exports {
                 add_unique(&mut names, name);
             }
@@ -8731,15 +8821,53 @@ fn analyze_cjs_exports_for_file(
     seen: &mut HashSet<String>,
     conditions: &[String],
 ) -> CjsExportAnalysis {
+    analyze_cjs_exports_for_file_impl(ctx, filename, source, seen, conditions, None)
+}
+
+fn analyze_cjs_exports_for_file_impl(
+    ctx: &Ctx<'_>,
+    filename: &str,
+    source: &str,
+    seen: &mut HashSet<String>,
+    conditions: &[String],
+    prepared_typescript: Option<&mut PreparedCjsTypeScriptGraph>,
+) -> CjsExportAnalysis {
+    record_commonjs_export_analysis(ctx);
     let mut analysis = analyze_cjs_exports(source);
     if !seen.insert(canonical_cjs_analysis_path(ctx, filename)) {
         return analysis;
     }
     let reexports = analysis.reexports.clone();
-    for name in analyze_cjs_reexport_specifier_names(ctx, filename, reexports, seen, conditions) {
+    for name in analyze_cjs_reexport_specifier_names(
+        ctx,
+        filename,
+        reexports,
+        seen,
+        conditions,
+        prepared_typescript,
+    ) {
         add_unique(&mut analysis.exports, name);
     }
     analysis
+}
+
+fn prepared_cjs_typescript_graph_object<'js>(
+    ctx: &Ctx<'js>,
+    graph: &PreparedCjsTypeScriptGraph,
+) -> rquickjs::Result<Object<'js>> {
+    let value = Object::new(ctx.clone())?;
+    for (filename, prepared) in graph {
+        let entry = Object::new(ctx.clone())?;
+        entry.set("originalSource", prepared.original_source.clone())?;
+        entry.set("preparedSource", prepared.prepared_source.clone())?;
+        let export_names = rquickjs::Array::new(ctx.clone())?;
+        for (index, name) in prepared.export_names.iter().enumerate() {
+            export_names.set(index, name.clone())?;
+        }
+        entry.set("exportNames", export_names)?;
+        value.set(filename, entry)?;
+    }
+    Ok(value)
 }
 
 struct PackageScopeInfo {
@@ -8817,6 +8945,23 @@ fn source_uses_esm_format(source: String) -> bool {
     source_looks_like_esm(&source) || has_cjs_wrapper_lexical_redeclaration(&source)
 }
 
+#[cfg(feature = "typescript-runtime")]
+fn typescript_module_path_is_esm(filename: &str, source: &str, package_type: Option<&str>) -> bool {
+    if filename.ends_with(".mts") {
+        return true;
+    }
+    if filename.ends_with(".cts") {
+        return false;
+    }
+    if package_type == Some("module") {
+        return true;
+    }
+    if package_type == Some("commonjs") {
+        return false;
+    }
+    crate::internal::typescript::source_uses_esm_format(source, filename).unwrap_or(false)
+}
+
 fn is_node_modules_package_scope(dir: &std::path::Path) -> bool {
     let Some(parent) = dir.parent() else {
         return false;
@@ -8867,15 +9012,15 @@ export default __cjs_default;
 
 const LOADER_CJS_FACADE_PREFIX: &str = "__wasm_rquickjs_loader_cjs_facade__:";
 
+type LoaderCjsFacadeRegistryState = (
+    u64,
+    std::collections::hash_map::RandomState,
+    HashMap<String, String>,
+);
+
 #[derive(Clone)]
 struct LoaderCjsFacadeRegistry {
-    inner: Rc<
-        RefCell<(
-            u64,
-            std::collections::hash_map::RandomState,
-            HashMap<String, String>,
-        )>,
-    >,
+    inner: Rc<RefCell<LoaderCjsFacadeRegistryState>>,
 }
 
 impl Default for LoaderCjsFacadeRegistry {
@@ -8895,9 +9040,9 @@ impl LoaderCjsFacadeRegistry {
         let mut inner = self.inner.borrow_mut();
         loop {
             inner.0 = inner.0.wrapping_add(1);
-            let mut hasher = inner.1.build_hasher();
-            inner.0.hash(&mut hasher);
-            let id = format!("{LOADER_CJS_FACADE_PREFIX}{:016x}", hasher.finish());
+            let counter = inner.0;
+            let hash = inner.1.hash_one(counter);
+            let id = format!("{LOADER_CJS_FACADE_PREFIX}{hash:016x}");
             if !inner.2.contains_key(&id) {
                 inner.2.insert(id.clone(), source);
                 return id;
@@ -9006,19 +9151,7 @@ impl Loader for CjsCompatLoader {
             return throw_import_attr_type_incompatible(ctx);
         }
 
-        let source_path = module_source_filesystem_path(ctx, path);
-        let source = read_module_source_or_throw(ctx, path, &source_path)?;
-        #[cfg(feature = "typescript-runtime")]
-        let source = if is_typescript {
-            transform_typescript_module_source(ctx, fs_path, source)?
-        } else {
-            source
-        };
-
         let fs_abs_path = ensure_absolute_path(fs_path);
-        let url = path_to_file_url(path);
-        let force_module = require_esm_forced_module(ctx, &fs_abs_path, &url);
-
         let package_scope =
             if fs_abs_path.ends_with(".js") || fs_abs_path.ends_with(".ts") || is_extensionless {
                 package_scope_info_or_throw(ctx, &fs_abs_path)?
@@ -9034,13 +9167,67 @@ impl Loader for CjsCompatLoader {
                 && package_scope
                     .as_ref()
                     .is_some_and(|scope| scope.is_node_modules_package));
+
+        let source_path = module_source_filesystem_path(ctx, path);
+        let source = read_module_source_or_throw(ctx, path, &source_path)?;
+        #[cfg(feature = "typescript-runtime")]
+        let original_source_for_cache = source.clone();
+        #[cfg(feature = "typescript-runtime")]
+        let cached_typescript_analysis = if is_typescript {
+            cached_cjs_typescript_analysis_for_filename(ctx, &fs_abs_path, &source)?
+        } else {
+            None
+        };
+        #[cfg(feature = "typescript-runtime")]
+        let cached_typescript_export_names = cached_typescript_analysis
+            .as_ref()
+            .and_then(|cached| cached.export_names.clone());
+        #[cfg(feature = "typescript-runtime")]
+        let cached_typescript_prepared_source =
+            cached_typescript_analysis.and_then(|cached| cached.prepared_source);
+        #[cfg(not(feature = "typescript-runtime"))]
+        let cached_typescript_export_names: Option<Vec<String>> = None;
+        #[cfg(not(feature = "typescript-runtime"))]
+        let cached_typescript_prepared_source: Option<String> = None;
+        let has_cached_typescript_export_names = cached_typescript_export_names.is_some();
+        let has_cached_typescript_prepared_source = cached_typescript_prepared_source.is_some();
+        let has_cached_cjs_typescript =
+            has_cached_typescript_export_names || has_cached_typescript_prepared_source;
+        #[cfg(feature = "typescript-runtime")]
+        let raw_typescript_looks_esm = is_typescript
+            && !has_cached_cjs_typescript
+            && typescript_module_path_is_esm(&fs_abs_path, &source, package_type.as_deref());
+        #[cfg(not(feature = "typescript-runtime"))]
+        let raw_typescript_looks_esm = false;
+        #[cfg(feature = "typescript-runtime")]
+        let should_prepare_typescript_source = is_typescript
+            && !has_cached_cjs_typescript
+            && !raw_typescript_looks_esm
+            && (fs_path.ends_with(".cts") || (!fs_path.ends_with(".mts") && !is_module_package_js));
+        #[cfg(feature = "typescript-runtime")]
+        let original_typescript_source = should_prepare_typescript_source.then(|| source.clone());
+        #[cfg(feature = "typescript-runtime")]
+        let source = if let Some(cached_source) = cached_typescript_prepared_source {
+            cached_source
+        } else if is_typescript && !has_cached_cjs_typescript {
+            transform_typescript_module_source(ctx, fs_path, source)?
+        } else {
+            source
+        };
+
+        let url = path_to_file_url(path);
+        let force_module = require_esm_forced_module(ctx, &fs_abs_path, &url);
+
         let cjs_url = url.clone();
         let has_esm_syntax = force_module
-            || source_looks_like_esm(&source)
-            || has_cjs_wrapper_lexical_redeclaration(&source);
+            || raw_typescript_looks_esm
+            || (!is_typescript
+                && (source_looks_like_esm(&source)
+                    || has_cjs_wrapper_lexical_redeclaration(&source)));
         // .cjs files are always CommonJS; JS-like files outside a module package
         // remain CommonJS unless syntax detection finds ESM.
-        let is_cjs = fs_path.ends_with(".cts")
+        let is_cjs = has_cached_cjs_typescript
+            || fs_path.ends_with(".cts")
             || is_cjs_ext
             || (!fs_path.ends_with(".mts")
                 && (is_commonjs_package_js || (!is_module_package_js && !has_esm_syntax)));
@@ -9064,20 +9251,62 @@ impl Loader for CjsCompatLoader {
             ctx,
             NodePackageResolveMode::CjsAnalysis.condition_mode(),
         );
-        let detected_analysis = analyze_cjs_exports_for_file(
-            ctx,
-            &fs_abs_path,
-            &source,
-            &mut HashSet::new(),
-            &cjs_conditions,
-        );
+        let mut prepared_typescript = PreparedCjsTypeScriptGraph::new();
+        #[cfg(feature = "typescript-runtime")]
+        if let Some(original_source) = original_typescript_source {
+            prepared_typescript.insert(
+                fs_abs_path.clone(),
+                PreparedCjsTypeScript {
+                    original_source,
+                    prepared_source: source.clone(),
+                    export_names: Vec::new(),
+                },
+            );
+        }
+        let detected_analysis = if let Some(exports) = cached_typescript_export_names {
+            CjsExportAnalysis {
+                exports,
+                ..CjsExportAnalysis::default()
+            }
+        } else {
+            analyze_cjs_exports_for_file_impl(
+                ctx,
+                &fs_abs_path,
+                &source,
+                &mut HashSet::new(),
+                &cjs_conditions,
+                Some(&mut prepared_typescript),
+            )
+        };
+        #[cfg(feature = "typescript-runtime")]
+        if has_cached_typescript_prepared_source && !has_cached_typescript_export_names {
+            cache_cjs_typescript_export_names_for_filename(
+                ctx,
+                &fs_abs_path,
+                &original_source_for_cache,
+                &detected_analysis.exports,
+            )?;
+        }
+        if let Some(prepared) = prepared_typescript.get_mut(&fs_abs_path) {
+            prepared.export_names = detected_analysis.exports.clone();
+        }
         // Let the existing CommonJS loader execute and cache the module. The
         // facade only exposes the shared module.exports object to ESM.
-        let init = file_import_meta_init(cjs_url, fs_abs_path.clone());
-        let default_member_expression = format!(
-            "__wasm_rquickjs_load_cjs_esm_facade_default(\"{}\")",
-            escape_js_string(&fs_abs_path),
-        );
+        let mut init = file_import_meta_init(cjs_url, fs_abs_path.clone());
+        if !prepared_typescript.is_empty() {
+            init.prepared_cjs_typescript = Some(prepared_typescript);
+        }
+        let default_member_expression = if init.prepared_cjs_typescript.is_some() {
+            format!(
+                "__wasm_rquickjs_load_cjs_esm_facade_default(\"{}\",__wasm_rquickjs_take_prepared_cjs_typescript(import.meta))",
+                escape_js_string(&fs_abs_path),
+            )
+        } else {
+            format!(
+                "__wasm_rquickjs_load_cjs_esm_facade_default(\"{}\")",
+                escape_js_string(&fs_abs_path),
+            )
+        };
         let wrapped =
             build_cjs_facade_source(&default_member_expression, &detected_analysis.exports);
 
@@ -9090,6 +9319,7 @@ struct ImportMetaInit {
     filename: Option<String>,
     dirname: Option<String>,
     include_resolve: bool,
+    prepared_cjs_typescript: Option<PreparedCjsTypeScriptGraph>,
 }
 
 fn declare_module_with_import_meta<'js>(
@@ -9120,6 +9350,13 @@ fn initialize_module_import_meta<'js>(
         })
         .configurable(),
     )?;
+    if let Some(prepared) = &init.prepared_cjs_typescript {
+        let value = prepared_cjs_typescript_graph_object(ctx, prepared)?;
+        meta.prop(
+            "__wasm_rquickjs_prepared_cjs_typescript",
+            Property::from(value).configurable(),
+        )?;
+    }
     if let Some(ref dirname) = init.dirname {
         meta.prop(
             "dirname",
@@ -9220,6 +9457,7 @@ fn url_only_import_meta_init(url: String) -> ImportMetaInit {
         filename: None,
         dirname: None,
         include_resolve: true,
+        prepared_cjs_typescript: None,
     }
 }
 
@@ -9232,6 +9470,7 @@ fn file_import_meta_init(url: String, filename: String) -> ImportMetaInit {
         filename: Some(filename),
         dirname,
         include_resolve: true,
+        prepared_cjs_typescript: None,
     }
 }
 
@@ -9386,7 +9625,7 @@ fn split_module_path_suffix(path: &str) -> (&str, &str) {
     if path.starts_with("data:") {
         return (path, "");
     }
-    let suffix_start = path.find(|ch| ch == '?' || ch == '#').unwrap_or(path.len());
+    let suffix_start = path.find(['?', '#']).unwrap_or(path.len());
     (&path[..suffix_start], &path[suffix_start..])
 }
 
@@ -9481,9 +9720,8 @@ fn strip_loader_realm_param_from_suffix(suffix: &str) -> String {
     let kept: Vec<&str> = query
         .split('&')
         .filter(|part| {
-            !part
-                .split_once('=')
-                .is_some_and(|(key, _)| key == LOADER_REALM_QUERY_PARAM)
+            part.split_once('=')
+                .is_none_or(|(key, _)| key != LOADER_REALM_QUERY_PARAM)
         })
         .collect();
     let mut stripped = String::new();
@@ -10687,7 +10925,7 @@ impl Loader for VirtualBuiltinModuleLoader {
         &mut self,
         ctx: &Ctx<'js>,
         path: &str,
-        _attributes: Option<ImportAttributes<'js>>
+        _attributes: Option<ImportAttributes<'js>>,
     ) -> rquickjs::Result<Module<'js, rquickjs::module::Declared>> {
         let Some(source) = self.modules.get(path) else {
             return Err(Error::new_loading(path));
@@ -11063,15 +11301,15 @@ fn declare_esm_file_module_from_source<'js>(
     }
 
     if let Some(error_source) =
-        esm_file_preflight_error_module_source(&source, preflight_mode, raw_cjs_global_messages)
+        esm_file_preflight_error_module_source(source, preflight_mode, raw_cjs_global_messages)
     {
         return Module::declare(ctx.clone(), module_id, error_source.as_bytes().to_vec());
     }
-    if let Some(error_source) = cjs_named_import_error_module_source(ctx, &fs_abs_path, &source) {
+    if let Some(error_source) = cjs_named_import_error_module_source(ctx, &fs_abs_path, source) {
         return Module::declare(ctx.clone(), module_id, error_source.as_bytes().to_vec());
     }
 
-    let has_top_level_await = source_has_top_level_await(&source, true);
+    let has_top_level_await = source_has_top_level_await(source, true);
     let injected = inject_module_source_prologue(
         init.filename.as_deref(),
         source,

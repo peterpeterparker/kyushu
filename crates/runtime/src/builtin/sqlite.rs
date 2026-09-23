@@ -291,21 +291,21 @@ fn js_value_to_sqlite<'js>(
         return Ok(rusqlite::types::Value::Blob(bytes));
     }
     // Check for other TypedArray types or DataView (has .buffer property)
-    if let Some(obj) = val.as_object() {
-        if let Ok(buffer_val) = obj.get::<_, rquickjs::Value<'js>>("buffer") {
-            if !buffer_val.is_undefined() && !buffer_val.is_null() {
-                let byte_offset: usize = obj.get::<_, f64>("byteOffset").unwrap_or(0.0) as usize;
-                let byte_length: usize = obj.get::<_, f64>("byteLength").unwrap_or(0.0) as usize;
-                if let Some(ab) = rquickjs::ArrayBuffer::from_value(buffer_val) {
-                    if let Some(raw_bytes) = ab.as_bytes() {
-                        let buf_len = raw_bytes.len();
-                        let end = (byte_offset + byte_length).min(buf_len);
-                        let start = byte_offset.min(end);
-                        let bytes = raw_bytes[start..end].to_vec();
-                        return Ok(rusqlite::types::Value::Blob(bytes));
-                    }
-                }
-            }
+    if let Some(obj) = val.as_object()
+        && let Ok(buffer_val) = obj.get::<_, rquickjs::Value<'js>>("buffer")
+        && !buffer_val.is_undefined()
+        && !buffer_val.is_null()
+    {
+        let byte_offset: usize = obj.get::<_, f64>("byteOffset").unwrap_or(0.0) as usize;
+        let byte_length: usize = obj.get::<_, f64>("byteLength").unwrap_or(0.0) as usize;
+        if let Some(ab) = rquickjs::ArrayBuffer::from_value(buffer_val)
+            && let Some(raw_bytes) = ab.as_bytes()
+        {
+            let buf_len = raw_bytes.len();
+            let end = (byte_offset + byte_length).min(buf_len);
+            let start = byte_offset.min(end);
+            let bytes = raw_bytes[start..end].to_vec();
+            return Ok(rusqlite::types::Value::Blob(bytes));
         }
     }
     // Unsupported type (undefined, function, symbol, regex, Promise, Map, Set, etc.)
@@ -555,7 +555,7 @@ fn validate_named_params<'js>(
 
         // Check if key directly matches a SQL parameter name
         let direct_match = (1..=stmt.parameter_count())
-            .any(|idx| stmt.parameter_name(idx).map_or(false, |name| name == key));
+            .any(|idx| stmt.parameter_name(idx).is_some_and(|name| name == key));
         if direct_match {
             continue;
         }
@@ -567,7 +567,7 @@ fn validate_named_params<'js>(
                 .filter(|name| {
                     name.len() > 1
                         && matches!(name.as_bytes()[0], b':' | b'@' | b'$')
-                        && &name[1..] == key
+                        && name[1..] == key
                 })
                 .map(String::from)
                 .collect();
@@ -758,15 +758,20 @@ fn stmt_run_impl<'js>(
     Ok(result)
 }
 
+#[derive(Clone, Copy)]
+struct StatementResultOptions {
+    allow_bare_named: bool,
+    allow_unknown_named: bool,
+    read_big_ints: bool,
+    return_arrays: bool,
+}
+
 fn stmt_get_impl<'js>(
     ctx: rquickjs::Ctx<'js>,
     conn_id: u32,
     sql: String,
     params: rquickjs::Value<'js>,
-    allow_bare_named: bool,
-    allow_unknown_named: bool,
-    read_big_ints: bool,
-    return_arrays: bool,
+    options: StatementResultOptions,
 ) -> rquickjs::Result<rquickjs::Value<'js>> {
     let _guard = JsCtxGuard::new(ctx.as_raw().as_ptr());
     let table = lock_conn_table(&ctx)?;
@@ -776,14 +781,26 @@ fn stmt_get_impl<'js>(
         .ok_or_else(|| rquickjs::Exception::throw_message(&ctx, "database is not open"))?;
 
     let mut stmt = conn.prepare(&sql).map_err(|e| sqlite_error(&ctx, &e))?;
-    validate_named_params(&ctx, &stmt, &params, allow_bare_named, allow_unknown_named)?;
-    bind_params(&ctx, &mut stmt, &params, allow_bare_named)?;
+    validate_named_params(
+        &ctx,
+        &stmt,
+        &params,
+        options.allow_bare_named,
+        options.allow_unknown_named,
+    )?;
+    bind_params(&ctx, &mut stmt, &params, options.allow_bare_named)?;
 
     let col_names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
     let mut rows = stmt.raw_query();
 
     match rows.next().map_err(|e| map_sqlite_or_udf_error(&ctx, e))? {
-        Some(row) => row_to_js(&ctx, &col_names, row, return_arrays, read_big_ints),
+        Some(row) => row_to_js(
+            &ctx,
+            &col_names,
+            row,
+            options.return_arrays,
+            options.read_big_ints,
+        ),
         None => Ok(rquickjs::Value::new_undefined(ctx.clone())),
     }
 }
@@ -793,10 +810,7 @@ fn stmt_all_impl<'js>(
     conn_id: u32,
     sql: String,
     params: rquickjs::Value<'js>,
-    allow_bare_named: bool,
-    allow_unknown_named: bool,
-    read_big_ints: bool,
-    return_arrays: bool,
+    options: StatementResultOptions,
 ) -> rquickjs::Result<rquickjs::Array<'js>> {
     let _guard = JsCtxGuard::new(ctx.as_raw().as_ptr());
     let table = lock_conn_table(&ctx)?;
@@ -806,8 +820,14 @@ fn stmt_all_impl<'js>(
         .ok_or_else(|| rquickjs::Exception::throw_message(&ctx, "database is not open"))?;
 
     let mut stmt = conn.prepare(&sql).map_err(|e| sqlite_error(&ctx, &e))?;
-    validate_named_params(&ctx, &stmt, &params, allow_bare_named, allow_unknown_named)?;
-    bind_params(&ctx, &mut stmt, &params, allow_bare_named)?;
+    validate_named_params(
+        &ctx,
+        &stmt,
+        &params,
+        options.allow_bare_named,
+        options.allow_unknown_named,
+    )?;
+    bind_params(&ctx, &mut stmt, &params, options.allow_bare_named)?;
 
     let col_names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
     let mut rows = stmt.raw_query();
@@ -815,7 +835,13 @@ fn stmt_all_impl<'js>(
     let mut idx = 0u32;
 
     while let Some(row) = rows.next().map_err(|e| map_sqlite_or_udf_error(&ctx, e))? {
-        let val = row_to_js(&ctx, &col_names, row, return_arrays, read_big_ints)?;
+        let val = row_to_js(
+            &ctx,
+            &col_names,
+            row,
+            options.return_arrays,
+            options.read_big_ints,
+        )?;
         result.set(idx as usize, val)?;
         idx += 1;
     }
@@ -900,7 +926,7 @@ fn stmt_iterate_init_impl<'js>(
             let mut row_vals = Vec::with_capacity(col_names.len());
             for i in 0..col_names.len() {
                 let val = row.get_ref(i).map_err(|e| sqlite_error(&ctx, &e))?;
-                row_vals.push(rusqlite::types::Value::from(val.clone()));
+                row_vals.push(rusqlite::types::Value::from(val));
             }
             all_values.push(row_vals);
         }
@@ -1028,7 +1054,7 @@ fn udf_js_result_to_sqlite<'js>(
             .clone()
             .to_i64()
             .map_err(|e| rusqlite::Error::UserFunctionError(format!("{}", e).into()))?;
-        if i > MAX_SAFE_INTEGER || i < MIN_SAFE_INTEGER {
+        if !(MIN_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&i) {
             return Err(save_udf_error(
                 ctx,
                 "RangeError",
@@ -1045,14 +1071,13 @@ fn udf_js_result_to_sqlite<'js>(
         return Ok(rusqlite::types::Value::Text(s));
     }
     // Check for Promise (thenable) before TypedArray
-    if let Some(obj) = result.as_object() {
-        if let Ok(then_val) = obj.get::<_, rquickjs::Value>("then") {
-            if then_val.is_function() {
-                return Err(rusqlite::Error::UserFunctionError(
-                    "Asynchronous user-defined functions are not supported".into(),
-                ));
-            }
-        }
+    if let Some(obj) = result.as_object()
+        && let Ok(then_val) = obj.get::<_, rquickjs::Value>("then")
+        && then_val.is_function()
+    {
+        return Err(rusqlite::Error::UserFunctionError(
+            "Asynchronous user-defined functions are not supported".into(),
+        ));
     }
     if let Ok(ta) = rquickjs::TypedArray::<u8>::from_value(result.clone()) {
         let bytes = ta
@@ -1080,20 +1105,29 @@ fn build_function_flags(deterministic: bool, direct_only: bool) -> FunctionFlags
     flags
 }
 
-fn register_function_impl<'js>(
-    ctx: rquickjs::Ctx<'js>,
-    conn_id: u32,
-    name: String,
-    callback: rquickjs::Function<'js>,
+#[derive(Clone, Copy)]
+struct FunctionOptions {
     deterministic: bool,
     direct_only: bool,
     use_big_int_args: bool,
     varargs: bool,
     num_args: i32,
+}
+
+fn register_function_impl<'js>(
+    ctx: rquickjs::Ctx<'js>,
+    conn_id: u32,
+    name: String,
+    callback: rquickjs::Function<'js>,
+    options: FunctionOptions,
 ) -> rquickjs::Result<()> {
     let persistent_fn = SendPersistent(rquickjs::Persistent::save(&ctx, callback));
-    let flags = build_function_flags(deterministic, direct_only);
-    let n_arg = if varargs { -1 } else { num_args };
+    let flags = build_function_flags(options.deterministic, options.direct_only);
+    let n_arg = if options.varargs {
+        -1
+    } else {
+        options.num_args
+    };
 
     let table = lock_conn_table(&ctx)?;
     let conn = table
@@ -1115,7 +1149,7 @@ fn register_function_impl<'js>(
         let mut js_args = Vec::with_capacity(args_count);
         for i in 0..args_count {
             let val = fctx.get_raw(i);
-            let js_val = udf_sqlite_value_to_js(&js_ctx, &val, use_big_int_args)?;
+            let js_val = udf_sqlite_value_to_js(&js_ctx, &val, options.use_big_int_args)?;
             js_args.push(js_val);
         }
 
@@ -1278,11 +1312,7 @@ fn register_aggregate_impl<'js>(
     start: rquickjs::Value<'js>,
     step: rquickjs::Function<'js>,
     result_fn: rquickjs::Value<'js>,
-    deterministic: bool,
-    direct_only: bool,
-    use_big_int_args: bool,
-    varargs: bool,
-    num_args: i32,
+    options: FunctionOptions,
 ) -> rquickjs::Result<()> {
     let persistent_start = rquickjs::Persistent::save(&ctx, start);
     let persistent_step = rquickjs::Persistent::save(&ctx, step);
@@ -1295,14 +1325,18 @@ fn register_aggregate_impl<'js>(
         None
     };
 
-    let flags = build_function_flags(deterministic, direct_only);
-    let n_arg = if varargs { -1 } else { num_args };
+    let flags = build_function_flags(options.deterministic, options.direct_only);
+    let n_arg = if options.varargs {
+        -1
+    } else {
+        options.num_args
+    };
 
     let aggr = JsAggregate {
         start: persistent_start,
         step: persistent_step,
         result_fn: persistent_result,
-        use_big_int_args,
+        use_big_int_args: options.use_big_int_args,
     };
 
     let table = lock_conn_table(&ctx)?;
@@ -1421,6 +1455,8 @@ fn session_close_impl<'js>(ctx: rquickjs::Ctx<'js>, session_id: u32) -> rquickjs
     Ok(())
 }
 
+type ChangesetFilter = Box<dyn Fn(&str) -> bool + Send + 'static>;
+
 fn apply_changeset_impl<'js>(
     ctx: rquickjs::Ctx<'js>,
     conn_id: u32,
@@ -1460,7 +1496,7 @@ fn apply_changeset_impl<'js>(
         None
     };
 
-    let filter_fn: Option<Box<dyn Fn(&str) -> bool + Send + 'static>> = if has_filter {
+    let filter_fn: Option<ChangesetFilter> = if has_filter {
         let pf = persistent_filter.unwrap();
         Some(Box::new(move |table_name: &str| -> bool {
             let js_ctx = match unsafe { get_udf_js_ctx() } {
@@ -2000,6 +2036,8 @@ pub mod native_module {
         )
     }
 
+    // These positional arguments are the public rquickjs bridge ABI consumed by sqlite.js.
+    #[allow(clippy::too_many_arguments)]
     #[rquickjs::function]
     pub fn stmt_get<'js>(
         ctx: Ctx<'js>,
@@ -2016,13 +2054,17 @@ pub mod native_module {
             conn_id,
             sql,
             params,
-            allow_bare_named,
-            allow_unknown_named,
-            read_big_ints,
-            return_arrays,
+            super::StatementResultOptions {
+                allow_bare_named,
+                allow_unknown_named,
+                read_big_ints,
+                return_arrays,
+            },
         )
     }
 
+    // These positional arguments are the public rquickjs bridge ABI consumed by sqlite.js.
+    #[allow(clippy::too_many_arguments)]
     #[rquickjs::function]
     pub fn stmt_all<'js>(
         ctx: Ctx<'js>,
@@ -2039,10 +2081,12 @@ pub mod native_module {
             conn_id,
             sql,
             params,
-            allow_bare_named,
-            allow_unknown_named,
-            read_big_ints,
-            return_arrays,
+            super::StatementResultOptions {
+                allow_bare_named,
+                allow_unknown_named,
+                read_big_ints,
+                return_arrays,
+            },
         )
     }
 
@@ -2100,6 +2144,8 @@ pub mod native_module {
         super::stmt_iterate_return_impl(ctx, iter_id)
     }
 
+    // These positional arguments are the public rquickjs bridge ABI consumed by sqlite.js.
+    #[allow(clippy::too_many_arguments)]
     #[rquickjs::function]
     pub fn register_function<'js>(
         ctx: Ctx<'js>,
@@ -2117,14 +2163,18 @@ pub mod native_module {
             conn_id,
             name,
             callback,
-            deterministic,
-            direct_only,
-            use_big_int_args,
-            varargs,
-            num_args,
+            super::FunctionOptions {
+                deterministic,
+                direct_only,
+                use_big_int_args,
+                varargs,
+                num_args,
+            },
         )
     }
 
+    // These positional arguments are the public rquickjs bridge ABI consumed by sqlite.js.
+    #[allow(clippy::too_many_arguments)]
     #[rquickjs::function]
     pub fn register_aggregate<'js>(
         ctx: Ctx<'js>,
@@ -2146,11 +2196,13 @@ pub mod native_module {
             start,
             step,
             result_fn,
-            deterministic,
-            direct_only,
-            use_big_int_args,
-            varargs,
-            num_args,
+            super::FunctionOptions {
+                deterministic,
+                direct_only,
+                use_big_int_args,
+                varargs,
+                num_args,
+            },
         )
     }
 

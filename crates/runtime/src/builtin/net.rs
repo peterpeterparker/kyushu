@@ -1156,29 +1156,31 @@ impl TcpSocket {
                 }
             }
         };
-        let mut inner = self.inner.borrow_mut();
-        inner.write_cancel = None;
-        if !leftover.is_empty() {
+        let send_future = {
+            let mut inner = self.inner.borrow_mut();
+            inner.write_cancel = None;
+            if leftover.is_empty() {
+                if !inner.closed {
+                    inner.writer = Some(writer);
+                }
+                return Ok(total as u32);
+            }
+
             // The peer hung up before all bytes were accepted.
             inner.writer = None;
-            let send_future = inner.send_future.take();
-            drop(inner);
-            if let Some(send_future) = send_future
-                && let Err(error) = send_future.await
-            {
-                return Err(throw_socket_error(
-                    &ctx,
-                    error_code_to_errno(&error),
-                    "write",
-                    &format!("send failed: {error:?}"),
-                ));
-            }
-            return Err(throw_socket_error(&ctx, "EPIPE", "write", "Stream closed"));
+            inner.send_future.take()
+        };
+        if let Some(send_future) = send_future
+            && let Err(error) = send_future.await
+        {
+            return Err(throw_socket_error(
+                &ctx,
+                error_code_to_errno(&error),
+                "write",
+                &format!("send failed: {error:?}"),
+            ));
         }
-        if !inner.closed {
-            inner.writer = Some(writer);
-        }
-        Ok(total as u32)
+        Err(throw_socket_error(&ctx, "EPIPE", "write", "Stream closed"))
     }
 
     pub fn shutdown(&self, ctx: Ctx<'_>, how: u32) -> rquickjs::Result<()> {
@@ -2217,10 +2219,9 @@ impl TcpListener {
             futures::pin_mut!(accept_fut);
             match futures::future::select(accept_fut, &mut cancel_rx).await {
                 Either::Left((accepted, _)) => accepted,
-                Either::Right((_, accept_fut)) => {
-                    // Cancelled by `close()`. Dropping the in-flight stream read
-                    // and the keepalive `Rc` releases the listener socket.
-                    drop(accept_fut);
+                Either::Right(_) => {
+                    // Returning drops the in-flight stream read and the keepalive
+                    // `Rc`, releasing the listener socket after `close()`.
                     return Err(throw_socket_error(
                         &ctx,
                         "EBADF",

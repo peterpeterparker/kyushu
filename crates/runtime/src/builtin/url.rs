@@ -357,15 +357,17 @@ pub mod native_module {
 }
 
 fn parse_url(raw_url: String, base: Opt<String>) -> Result<Url, String> {
+    if base.0.is_some() {
+        // WHATWG parsing can treat an input that contains a scheme as relative
+        // to a same-scheme special URL (for example `file:packages/x` against
+        // `file:///workspace/`). Parsing the input as an absolute URL first
+        // loses that base-sensitive behavior.
+        return parse_url_with_base(raw_url, base.0, None);
+    }
+
     match Url::parse(&raw_url) {
-        Ok(url) => {
-            if url.scheme() != "" {
-                Ok(url)
-            } else {
-                parse_url_with_base(raw_url, base.0, None)
-            }
-        }
-        Err(err) => parse_url_with_base(raw_url, base.0, Some(err.to_string())),
+        Ok(url) => Ok(url),
+        Err(err) => Err(format!("Failed to parse URL: {err}")),
     }
 }
 

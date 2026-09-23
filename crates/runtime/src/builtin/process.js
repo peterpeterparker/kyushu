@@ -596,8 +596,10 @@ globalThis.__wasm_rquickjs_handleUncaughtError = __wasm_rquickjs_handleUncaughtE
 
 function __drainNextTickQueue() {
     __nextTickWakeupScheduled = false;
+    let drained = 0;
     while (__nextTickQueue.length > 0) {
         const entry = __nextTickQueue.shift();
+        drained += 1;
         try {
             if (entry.domain) {
                 entry.domain.enter();
@@ -613,6 +615,7 @@ function __drainNextTickQueue() {
             __wasm_rquickjs_handleUncaughtError(e, entry.domain);
         }
     }
+    return drained;
 }
 
 function __requestNextTickWakeup() {
@@ -629,9 +632,8 @@ function __requestNextTickWakeup() {
     }
 }
 
-// Expose the drain function so that timer callbacks can drain pending
-// nextTick work before executing, matching Node.js's guarantee that
-// process.nextTick always fires before timers (setTimeout/setImmediate).
+// Expose the drain function for the Rust turn-checkpoint bridge, which owns
+// draining nextTick before QuickJS jobs and host callbacks.
 globalThis.__wasm_rquickjs_drainNextTick = __drainNextTickQueue;
 globalThis.__wasm_rquickjs_requestNextTickWakeup = __requestNextTickWakeup;
 
@@ -1000,45 +1002,20 @@ process._runExitHandlers = function _runExitHandlers(code) {
 // that handle the rejection synchronously don't cause false positives.
 const _pendingRejections = new Map();
 const _ignoredUnhandledRejections = new WeakSet();
+const _emittedUnhandledRejections = new WeakSet();
+const _pendingRejectionHandled = new Set();
 const _requireEsmRejectionScopes = [];
 const _sameValue = Object.is;
-let _unhandledRejectionCheckScheduled = false;
 let _nextRequireEsmRejectionScope = 0;
 
 function _isIgnoredUnhandledRejection(promise) {
     return _ignoredUnhandledRejections.has(promise);
 }
 
-function _scheduleUnhandledRejectionCheck() {
-    if (_unhandledRejectionCheckScheduled) {
-        return;
-    }
-    _unhandledRejectionCheckScheduled = true;
-    const callback = function() {
-        _unhandledRejectionCheckScheduled = false;
-        const pending = Array.from(_pendingRejections);
-        for (const [promise, entry] of pending) {
-            if (!_pendingRejections.has(promise)) {
-                continue;
-            }
-            _pendingRejections.delete(promise);
-            if (!_isIgnoredUnhandledRejection(promise)) {
-                process.emit('unhandledRejection', entry.reason, promise);
-            }
-        }
-    };
-    if (typeof globalThis.setTimeout === 'function') {
-        globalThis.setTimeout(callback, 0);
-    } else {
-        Promise.resolve().then(function() {
-            Promise.resolve().then(callback);
-        });
-    }
-}
-
 globalThis.__wasm_rquickjs_rejection_tracker = function(promise, reason, isHandled) {
     if (_isIgnoredUnhandledRejection(promise)) {
         _pendingRejections.delete(promise);
+        _pendingRejectionHandled.delete(promise);
         return;
     }
     if (!isHandled) {
@@ -1047,15 +1024,63 @@ globalThis.__wasm_rquickjs_rejection_tracker = function(promise, reason, isHandl
         if (scope !== undefined) {
             scope.promises.push(promise);
         }
-        _scheduleUnhandledRejectionCheck();
     } else {
-        _pendingRejections.delete(promise);
+        if (!_pendingRejections.delete(promise) && _emittedUnhandledRejections.has(promise)) {
+            _emittedUnhandledRejections.delete(promise);
+            _pendingRejectionHandled.add(promise);
+        }
     }
+};
+
+// Called only by the host event-loop checkpoint after process.nextTick and
+// QuickJS jobs have stabilized. Keeping this private avoids introducing a
+// public timer whose lifetime or ordering would differ from Node's turn-end
+// promise rejection processing.
+globalThis.__wasm_rquickjs_unhandled_rejection_checkpoint = function() {
+    if (_pendingRejectionHandled.size === 0 && _pendingRejections.size === 0) {
+        return 0;
+    }
+
+    let emitted = 0;
+    const handled = Array.from(_pendingRejectionHandled);
+    for (const promise of handled) {
+        if (!_pendingRejectionHandled.delete(promise)) {
+            continue;
+        }
+        if (!_isIgnoredUnhandledRejection(promise)) {
+            emitted += 1;
+            try {
+                process.emit('rejectionHandled', promise);
+            } catch (error) {
+                __wasm_rquickjs_handleUncaughtError(error);
+            }
+        }
+    }
+
+    const pending = Array.from(_pendingRejections);
+    for (const [promise, entry] of pending) {
+        if (!_pendingRejections.has(promise)) {
+            continue;
+        }
+        _pendingRejections.delete(promise);
+        if (!_isIgnoredUnhandledRejection(promise)) {
+            _emittedUnhandledRejections.add(promise);
+            emitted += 1;
+            try {
+                process.emit('unhandledRejection', entry.reason, promise);
+            } catch (error) {
+                __wasm_rquickjs_handleUncaughtError(error);
+            }
+        }
+    }
+    return emitted;
 };
 
 globalThis.__wasm_rquickjs_ignore_unhandled_rejection = function(promise) {
     _ignoredUnhandledRejections.add(promise);
     _pendingRejections.delete(promise);
+    _emittedUnhandledRejections.delete(promise);
+    _pendingRejectionHandled.delete(promise);
 };
 
 globalThis.__wasm_rquickjs_begin_require_esm_rejection_scope = function() {
@@ -1081,6 +1106,8 @@ globalThis.__wasm_rquickjs_ignore_require_esm_rejection = function(evaluationPro
     const scope = _takeRequireEsmRejectionScope(id);
     _ignoredUnhandledRejections.add(evaluationPromise);
     _pendingRejections.delete(evaluationPromise);
+    _emittedUnhandledRejections.delete(evaluationPromise);
+    _pendingRejectionHandled.delete(evaluationPromise);
 
     if (scope !== undefined) {
         // QuickJS reports the internal module-evaluation promise immediately
@@ -1094,6 +1121,8 @@ globalThis.__wasm_rquickjs_ignore_require_esm_rejection = function(evaluationPro
             if (moduleEntry !== undefined && _sameValue(moduleEntry.reason, rejectedReason)) {
                 _ignoredUnhandledRejections.add(modulePromise);
                 _pendingRejections.delete(modulePromise);
+                _emittedUnhandledRejections.delete(modulePromise);
+                _pendingRejectionHandled.delete(modulePromise);
             }
         }
     }

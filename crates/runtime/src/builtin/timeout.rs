@@ -1,4 +1,7 @@
-use crate::internal::{format_caught_error, runtime_services::RuntimeServices};
+use crate::internal::{
+    format_caught_error,
+    runtime_services::{RuntimeServices, run_process_turn_checkpoint},
+};
 use rquickjs::function::Args;
 use rquickjs::{CatchResultExt, Ctx, Persistent, Value};
 
@@ -140,7 +143,7 @@ async fn scheduled_task(
         #[cfg(feature = "p3")]
         wasip3::clocks::monotonic_clock::wait_for(duration_ns).await;
 
-        run_scheduled_task(ctx.clone(), code_or_fn.clone(), args.clone())
+        run_scheduled_task(ctx.clone(), code_or_fn.clone(), args.clone(), timer_key)
             .catch(&ctx)
             .unwrap_or_else(|e| {
                 eprintln!(
@@ -172,7 +175,27 @@ fn run_scheduled_task(
     ctx: Ctx,
     code_or_fn: Persistent<Value<'static>>,
     args: Persistent<Vec<Value<'static>>>,
+    timer_key: usize,
 ) -> rquickjs::Result<()> {
+    // A timer is the next host callback. Give nextTick and Promise jobs from
+    // the preceding turn their normal handler opportunity, then report any
+    // remaining unhandled rejections before this callback runs.
+    run_process_turn_checkpoint(&ctx)?;
+
+    // A rejection listener may cancel the timer whose callback was about to
+    // run. The abort signal is observed only at the next async poll, so honor
+    // the removed handle synchronously at this callback boundary as Node does.
+    if !ctx
+        .userdata::<RuntimeServices>()
+        .expect("runtime services not initialized")
+        .timers
+        .abort_handles
+        .borrow()
+        .contains_key(&timer_key)
+    {
+        return Ok(());
+    }
+
     let restored_code_or_fn = code_or_fn.restore(&ctx)?;
     let restored_args = args.restore(&ctx)?;
 
@@ -189,7 +212,9 @@ fn run_scheduled_task(
 
     result?;
 
-    while ctx.execute_pending_job() {}
+    // A timer callback is itself a Node turn. Drain nextTick before Promise jobs and process
+    // rejection events to a fixpoint before another timer callback can run.
+    run_process_turn_checkpoint(&ctx)?;
 
     Ok(())
 }

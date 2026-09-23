@@ -453,8 +453,8 @@ async function streamingRequest(
     }
 }
 
-function responseAbortError() {
-    return new DOMException('The operation was aborted.', 'AbortError');
+function responseAbortReason(signal) {
+    return signal?.reason || new DOMException('The operation was aborted.', 'AbortError');
 }
 
 export class Response {
@@ -468,6 +468,28 @@ export class Response {
             this._isError = isError;
             this._isNative = true;
             this._signal = signal;
+            this._abortBodyListener = undefined;
+            this._bodyStream = undefined;
+            this._nativeBodyState = {source: undefined, controller: undefined, discarded: false};
+            if (signal?.aborted) {
+                this.nativeResponse.discardBody();
+            } else if (signal) {
+                const responseRef = new WeakRef(this);
+                this._abortBodyListener = () => {
+                    const response = responseRef.deref();
+                    if (!response) return;
+                    const bodyState = response._nativeBodyState;
+                    bodyState.discarded = true;
+                    if (bodyState.source) {
+                        bodyState.source.discard();
+                    } else if (!response.bodyUsed) {
+                        response.nativeResponse.discardBody();
+                    }
+                    bodyState.controller?.error(responseAbortReason(signal));
+                    response._detachAbortBodyListener();
+                };
+                signal.addEventListener('abort', this._abortBodyListener, {once: true});
+            }
         } else {
             // Standard Web API path: new Response(body, init)
             const body = bodyOrNative;
@@ -487,6 +509,13 @@ export class Response {
         }
     }
 
+    _detachAbortBodyListener() {
+        if (this._signal && this._abortBodyListener) {
+            this._signal.removeEventListener('abort', this._abortBodyListener);
+            this._abortBodyListener = undefined;
+        }
+    }
+
     get status() {
         if (this._isNative) {
             return this.nativeResponse.status;
@@ -503,41 +532,57 @@ export class Response {
 
     get body() {
         if (this._isNative) {
-            let nativeStreamSourceSlot = {
-                nativeStreamSource: undefined
-            };
+            if (this._bodyStream !== undefined) return this._bodyStream;
             let response = this;
-            return new ReadableStream({
-                start() {
+            const bodyState = this._nativeBodyState;
+            this._bodyStream = new ReadableStream({
+                start(controller) {
+                    bodyState.controller = controller;
                 },
                 get type() {
                     return "bytes";
                 },
                 async pull(controller) {
-                    if (response._signal?.aborted) throw responseAbortError();
-                    if (nativeStreamSourceSlot.nativeStreamSource === undefined) {
-                        nativeStreamSourceSlot.nativeStreamSource = response.nativeResponse.stream();
-                        response.bodyUsed = true;
+                    response.bodyUsed = true;
+                    if (response._signal?.aborted) throw responseAbortReason(response._signal);
+                    if (bodyState.source === undefined) {
+                        bodyState.source = response.nativeResponse.stream();
                     }
 
                     let next;
                     let err;
                     try {
-                        [next, err] = await nativeStreamSourceSlot.nativeStreamSource.pull();
+                        [next, err] = await bodyState.source.pull();
                     } catch (error) {
-                        if (response._signal?.aborted) throw responseAbortError();
+                        response._detachAbortBodyListener();
+                        if (response._signal?.aborted) throw responseAbortReason(response._signal);
                         throw error;
                     }
                     if (err !== undefined) {
+                        response._detachAbortBodyListener();
                         console.error("Error reading response body stream:", err);
                         controller.error(err);
                     } else if (next === undefined) {
+                        response._detachAbortBodyListener();
                         controller.close();
                     } else {
                         controller.enqueue(next);
                     }
+                },
+                cancel() {
+                    response.bodyUsed = true;
+                    bodyState.discarded = true;
+                    if (bodyState.source) {
+                        response._detachAbortBodyListener();
+                        bodyState.source.discard();
+                        return bodyState.source.waitForDiscard();
+                    } else {
+                        response._detachAbortBodyListener();
+                        return response.nativeResponse.discardBodyAndWait();
+                    }
                 }
             });
+            return this._bodyStream;
         }
 
         if (this._body === null) {
@@ -658,13 +703,17 @@ export class Response {
     }
 
     clone() {
-        if (this.bodyUsed) {
+        const bodyLocked = this._isNative
+            ? this._bodyStream?.locked === true
+            : this._body instanceof ReadableStream && this._body.locked;
+        if (this.bodyUsed || bodyLocked) {
             throw new TypeError('Response body is already consumed');
         }
 
         if (this._isNative) {
+            const nativeClone = this.nativeResponse.clone();
             return new Response(
-                this.nativeResponse.clone(),
+                nativeClone,
                 this.url,
                 this._credentials,
                 this._isError,
@@ -706,16 +755,16 @@ export class Response {
 
     async arrayBuffer() {
         if (this._isNative) {
-            if (this._signal?.aborted) throw responseAbortError();
-            let result;
-            try {
-                result = await this.nativeResponse.arrayBuffer();
-            } catch (error) {
-                if (this._signal?.aborted) throw responseAbortError();
-                throw error;
-            }
             this.bodyUsed = true;
-            return result;
+            if (this._signal?.aborted) throw responseAbortReason(this._signal);
+            try {
+                return await this.nativeResponse.arrayBuffer(this._signal);
+            } catch (error) {
+                if (this._signal?.aborted) throw responseAbortReason(this._signal);
+                throw error;
+            } finally {
+                this._detachAbortBodyListener();
+            }
         }
         this.bodyUsed = true;
         if (this._body === null) {
@@ -770,16 +819,16 @@ export class Response {
 
     async text() {
         if (this._isNative) {
-            if (this._signal?.aborted) throw responseAbortError();
-            let result;
-            try {
-                result = await this.nativeResponse.text();
-            } catch (error) {
-                if (this._signal?.aborted) throw responseAbortError();
-                throw error;
-            }
             this.bodyUsed = true;
-            return result;
+            if (this._signal?.aborted) throw responseAbortReason(this._signal);
+            try {
+                return await this.nativeResponse.text(this._signal);
+            } catch (error) {
+                if (this._signal?.aborted) throw responseAbortReason(this._signal);
+                throw error;
+            } finally {
+                this._detachAbortBodyListener();
+            }
         }
         this.bodyUsed = true;
         if (this._body === null) {
