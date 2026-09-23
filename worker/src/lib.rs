@@ -1,5 +1,12 @@
 #[allow(warnings)]
-mod bindings;
+mod bindings {
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "kyushu:worker/worker",
+        runtime_path: "wit_bindgen_rt",
+        generate_all,
+    });
+}
 mod handler;
 mod runtime;
 mod setup;
