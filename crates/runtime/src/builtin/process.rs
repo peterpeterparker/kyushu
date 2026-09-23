@@ -3,8 +3,7 @@
 pub mod native_module {
     use rquickjs::Ctx;
     use std::collections::HashMap;
-    use std::io::Write;
-    use std::path::PathBuf;
+    use std::path::Path;
     use std::time::Instant;
 
     #[rquickjs::function]
@@ -22,38 +21,55 @@ pub mod native_module {
     }
 
     #[rquickjs::function]
-    pub fn write_stdout(data: String) {
-        let _ = std::io::stdout().write_all(data.as_bytes());
-        let _ = std::io::stdout().flush();
+    pub fn write_stdout(ctx: Ctx<'_>, data: String) {
+        let sink = ctx
+            .userdata::<crate::internal::runtime_services::RuntimeServices>()
+            .expect("runtime services not initialized")
+            .output_sink();
+        sink.write_stdout(&data);
     }
 
     #[rquickjs::function]
-    pub fn write_stderr(data: String) {
-        let _ = std::io::stderr().write_all(data.as_bytes());
-        let _ = std::io::stderr().flush();
+    pub fn write_stderr(ctx: Ctx<'_>, data: String) {
+        let sink = ctx
+            .userdata::<crate::internal::runtime_services::RuntimeServices>()
+            .expect("runtime services not initialized")
+            .output_sink();
+        sink.write_stderr(&data);
     }
 
     #[rquickjs::function]
-    pub fn get_args() -> Vec<String> {
-        std::env::args().collect()
+    pub fn get_args(ctx: Ctx<'_>) -> Vec<String> {
+        ctx.userdata::<crate::internal::runtime_services::RuntimeServices>()
+            .expect("runtime services not initialized")
+            .process
+            .args()
     }
 
     #[rquickjs::function]
-    pub fn get_env() -> HashMap<String, String> {
-        std::env::vars().collect()
+    pub fn get_env(ctx: Ctx<'_>) -> HashMap<String, String> {
+        ctx.userdata::<crate::internal::runtime_services::RuntimeServices>()
+            .expect("runtime services not initialized")
+            .process
+            .env()
     }
 
     #[rquickjs::function]
-    pub fn get_cwd() -> String {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("/"))
+    pub fn get_cwd(ctx: Ctx<'_>) -> String {
+        ctx.userdata::<crate::internal::runtime_services::RuntimeServices>()
+            .expect("runtime services not initialized")
+            .process
+            .cwd()
             .to_string_lossy()
             .into_owned()
     }
 
     #[rquickjs::function]
-    pub fn chdir(path: String) -> Option<String> {
-        match std::env::set_current_dir(path) {
+    pub fn chdir(ctx: Ctx<'_>, path: String) -> Option<String> {
+        let services = ctx
+            .userdata::<crate::internal::runtime_services::RuntimeServices>()
+            .expect("runtime services not initialized");
+        match services.process.chdir(Path::new(&path)) {
             Ok(()) => None,
             Err(error) => Some(
                 match error.kind() {
@@ -72,6 +88,22 @@ pub mod native_module {
         static ORIGIN: OnceLock<Instant> = OnceLock::new();
         let origin = ORIGIN.get_or_init(Instant::now);
         origin.elapsed().as_nanos() as u64
+    }
+
+    #[rquickjs::function]
+    pub fn has_typescript_runtime() -> bool {
+        cfg!(feature = "typescript-runtime")
+    }
+
+    #[rquickjs::function]
+    pub fn typescript_runtime_mode() -> Option<&'static str> {
+        if cfg!(feature = "typescript-transform-runtime") {
+            Some("transform")
+        } else if cfg!(feature = "typescript-runtime") {
+            Some("strip")
+        } else {
+            None
+        }
     }
 }
 

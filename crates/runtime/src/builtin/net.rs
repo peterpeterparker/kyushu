@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use rquickjs::class::Trace;
 use rquickjs::prelude::List;
-use rquickjs::{Ctx, Exception, JsLifetime};
+use rquickjs::{Ctx, Exception, JsLifetime, TypedArray};
 
 #[cfg(feature = "p2")]
 use wasip2::io::streams::{InputStream, OutputStream, StreamError};
@@ -41,6 +41,8 @@ use wasip3::wit_bindgen::rt::async_support::{
     FutureReader, StreamReader, StreamResult, StreamWriter,
 };
 
+#[cfg(feature = "p2")]
+use super::socket_helpers::stream_error_to_errno;
 use super::socket_helpers::{
     error_code_to_errno, ip_address_to_string, ip_socket_address, ip_socket_address_family,
     ip_socket_address_port, parse_ip_address, throw_socket_error,
@@ -164,6 +166,7 @@ fn create_tcp_socket_impl(ctx: &Ctx<'_>, family: u32) -> rquickjs::Result<TcpSoc
             writer: None,
             send_future: None,
             recv_future: None,
+            recv_error: None,
             read_cancel: None,
             write_cancel: None,
             family: ip_family,
@@ -190,6 +193,9 @@ struct TcpInner {
     /// the operations are not cancelled while their streams are in use.
     send_future: Option<FutureReader<Result<(), ErrorCode>>>,
     recv_future: Option<FutureReader<Result<(), ErrorCode>>>,
+    /// Receive completion error retained until already-buffered bytes have been
+    /// delivered to JavaScript.
+    recv_error: Option<ErrorCode>,
     /// Wakes the in-flight `read()` / `write()` (if any) when the socket is
     /// closed or the corresponding side is shut down. Without this, a pending
     /// `StreamReader::read` would pin the socket resource (via its cloned `Rc`)
@@ -490,18 +496,27 @@ impl TcpSocket {
                 // Err(Closed) = EOF / peer sent FIN
                 Err(StreamError::Closed) => return Ok(None),
                 Err(StreamError::LastOperationFailed(e)) => {
+                    let debug_message = e.to_debug_string();
                     return Err(throw_socket_error(
                         &ctx,
-                        "EIO",
+                        stream_error_to_errno(&debug_message),
                         "read",
-                        &format!("read failed: {e:?}"),
+                        &format!("read failed: {debug_message}"),
                     ));
                 }
             }
         }
     }
 
-    pub async fn write(&self, ctx: Ctx<'_>, data: Vec<u8>) -> rquickjs::Result<u32> {
+    pub async fn write<'js>(
+        &self,
+        ctx: Ctx<'js>,
+        data: TypedArray<'js, u8>,
+    ) -> rquickjs::Result<u32> {
+        let data = data
+            .as_bytes()
+            .ok_or_else(|| Exception::throw_message(&ctx, "write buffer is detached"))?
+            .to_vec();
         let start_gen = {
             let inner = self.inner.borrow();
             if inner.closed {
@@ -538,12 +553,15 @@ impl TcpSocket {
                         StreamError::Closed => {
                             throw_socket_error(&ctx, "EPIPE", "write", "Stream closed")
                         }
-                        StreamError::LastOperationFailed(e) => throw_socket_error(
-                            &ctx,
-                            "EIO",
-                            "write",
-                            &format!("check_write failed: {e:?}"),
-                        ),
+                        StreamError::LastOperationFailed(e) => {
+                            let debug_message = e.to_debug_string();
+                            throw_socket_error(
+                                &ctx,
+                                stream_error_to_errno(&debug_message),
+                                "write",
+                                &format!("check_write failed: {debug_message}"),
+                            )
+                        }
                     })?
                 };
 
@@ -588,7 +606,13 @@ impl TcpSocket {
                         throw_socket_error(&ctx, "EPIPE", "write", "Stream closed")
                     }
                     StreamError::LastOperationFailed(e) => {
-                        throw_socket_error(&ctx, "EIO", "write", &format!("write failed: {e:?}"))
+                        let debug_message = e.to_debug_string();
+                        throw_socket_error(
+                            &ctx,
+                            stream_error_to_errno(&debug_message),
+                            "write",
+                            &format!("write failed: {debug_message}"),
+                        )
                     }
                 })?;
             };
@@ -926,6 +950,7 @@ impl TcpSocket {
             inner.writer = None;
             inner.send_future = None;
             inner.recv_future = None;
+            inner.recv_error = None;
             return Err(throw_socket_error(
                 &ctx,
                 error_code_to_errno(&e),
@@ -952,6 +977,7 @@ impl TcpSocket {
         }
         inner.reader = Some(recv_reader);
         inner.recv_future = Some(recv_future);
+        inner.recv_error = None;
         inner.writer = Some(writer);
         inner.send_future = Some(send_future);
         inner.connected = true;
@@ -961,6 +987,14 @@ impl TcpSocket {
     pub async fn read(&self, ctx: Ctx<'_>, len: u64) -> rquickjs::Result<Option<Vec<u8>>> {
         let (_keepalive, mut reader, mut cancel_rx) = {
             let mut inner = self.inner.borrow_mut();
+            if let Some(error) = inner.recv_error.take() {
+                return Err(throw_socket_error(
+                    &ctx,
+                    error_code_to_errno(&error),
+                    "read",
+                    &format!("receive failed: {error:?}"),
+                ));
+            }
             if inner.closed {
                 return Err(throw_socket_error(
                     &ctx,
@@ -1021,12 +1055,28 @@ impl TcpSocket {
                 // A zero-length completion carries no data and no EOF signal; retry.
                 StreamResult::Complete(_) => continue,
                 StreamResult::Dropped => {
-                    // Peer sent FIN / stream closed. Drop the reader so subsequent
-                    // reads observe EOF.
-                    let mut inner = self.inner.borrow_mut();
-                    inner.read_cancel = None;
-                    inner.reader = None;
-                    inner.recv_future = None;
+                    // The stream closing does not distinguish a graceful FIN
+                    // from a socket error. The receive completion future does.
+                    let recv_future = {
+                        let mut inner = self.inner.borrow_mut();
+                        inner.read_cancel = None;
+                        inner.reader = None;
+                        inner.recv_future.take()
+                    };
+                    if let Some(recv_future) = recv_future
+                        && let Err(error) = recv_future.await
+                    {
+                        if !buf.is_empty() {
+                            self.inner.borrow_mut().recv_error = Some(error);
+                            return Ok(Some(buf));
+                        }
+                        return Err(throw_socket_error(
+                            &ctx,
+                            error_code_to_errno(&error),
+                            "read",
+                            &format!("receive failed: {error:?}"),
+                        ));
+                    }
                     if buf.is_empty() {
                         return Ok(None);
                     }
@@ -1040,7 +1090,15 @@ impl TcpSocket {
         }
     }
 
-    pub async fn write(&self, ctx: Ctx<'_>, data: Vec<u8>) -> rquickjs::Result<u32> {
+    pub async fn write<'js>(
+        &self,
+        ctx: Ctx<'js>,
+        data: TypedArray<'js, u8>,
+    ) -> rquickjs::Result<u32> {
+        let data = data
+            .as_bytes()
+            .ok_or_else(|| Exception::throw_message(&ctx, "write buffer is detached"))?
+            .to_vec();
         let total = data.len();
         let (_keepalive, mut writer, mut cancel_rx) = {
             let mut inner = self.inner.borrow_mut();
@@ -1098,18 +1156,31 @@ impl TcpSocket {
                 }
             }
         };
-        let mut inner = self.inner.borrow_mut();
-        inner.write_cancel = None;
-        if !leftover.is_empty() {
+        let send_future = {
+            let mut inner = self.inner.borrow_mut();
+            inner.write_cancel = None;
+            if leftover.is_empty() {
+                if !inner.closed {
+                    inner.writer = Some(writer);
+                }
+                return Ok(total as u32);
+            }
+
             // The peer hung up before all bytes were accepted.
             inner.writer = None;
-            inner.send_future = None;
-            return Err(throw_socket_error(&ctx, "EPIPE", "write", "Stream closed"));
+            inner.send_future.take()
+        };
+        if let Some(send_future) = send_future
+            && let Err(error) = send_future.await
+        {
+            return Err(throw_socket_error(
+                &ctx,
+                error_code_to_errno(&error),
+                "write",
+                &format!("send failed: {error:?}"),
+            ));
         }
-        if !inner.closed {
-            inner.writer = Some(writer);
-        }
-        Ok(total as u32)
+        Err(throw_socket_error(&ctx, "EPIPE", "write", "Stream closed"))
     }
 
     pub fn shutdown(&self, ctx: Ctx<'_>, how: u32) -> rquickjs::Result<()> {
@@ -1355,6 +1426,7 @@ impl TcpSocket {
         inner.send_future = None;
         inner.reader = None;
         inner.recv_future = None;
+        inner.recv_error = None;
         inner.socket = None;
     }
 
@@ -2147,10 +2219,9 @@ impl TcpListener {
             futures::pin_mut!(accept_fut);
             match futures::future::select(accept_fut, &mut cancel_rx).await {
                 Either::Left((accepted, _)) => accepted,
-                Either::Right((_, accept_fut)) => {
-                    // Cancelled by `close()`. Dropping the in-flight stream read
-                    // and the keepalive `Rc` releases the listener socket.
-                    drop(accept_fut);
+                Either::Right(_) => {
+                    // Returning drops the in-flight stream read and the keepalive
+                    // `Rc`, releasing the listener socket after `close()`.
                     return Err(throw_socket_error(
                         &ctx,
                         "EBADF",
@@ -2213,6 +2284,7 @@ impl TcpListener {
                 writer: Some(writer),
                 send_future: Some(send_future),
                 recv_future: Some(recv_future),
+                recv_error: None,
                 read_cancel: None,
                 write_cancel: None,
                 family: client_family,

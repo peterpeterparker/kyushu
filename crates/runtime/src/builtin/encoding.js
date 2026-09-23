@@ -5,7 +5,6 @@ import {
     ERR_ENCODING_NOT_SUPPORTED,
     ERR_INVALID_ARG_TYPE,
     ERR_INVALID_THIS,
-    ERR_NO_ICU,
 } from '__wasm_rquickjs_builtin/internal/errors';
 
 const customInspectSymbol = Symbol.for('nodejs.util.inspect.custom');
@@ -132,6 +131,13 @@ function toDecodeBytes(input) {
 }
 
 function decodeNative(bytes, state, stream) {
+    if (state.nativeDecoder !== null) {
+        const [result, error] = state.nativeDecoder.decode(bytes, stream, state.fatal);
+        if (error !== undefined) {
+            throw new ERR_ENCODING_INVALID_ENCODED_DATA(state.encoding);
+        }
+        return result;
+    }
     const [result, error] = encodingNative.decode(bytes, state.encoding, stream, state.fatal, state.ignoreBOMForNextDecode);
     if (error !== undefined) {
         throw new ERR_ENCODING_INVALID_ENCODED_DATA(state.encoding);
@@ -144,9 +150,6 @@ export class TextDecoder {
         validateOptions(options);
         const encoding = normalizeLabel(label);
         const fatal = !!options?.fatal;
-        if (fatal) {
-            throw new ERR_NO_ICU('fatal');
-        }
 
         textDecoderState.set(this, {
             encoding,
@@ -155,6 +158,9 @@ export class TextDecoder {
             ignoreBOMForNextDecode: !!options?.ignoreBOM,
             pending: new Uint8Array(0),
             streaming: false,
+            nativeDecoder: encodingNative.has_native_text_decoder()
+                ? new encodingNative.NativeTextDecoder(encoding, !!options?.ignoreBOM)
+                : null,
         });
     }
 
@@ -176,12 +182,16 @@ export class TextDecoder {
 
         let bytes = toDecodeBytes(buffer);
         const stream = !!options?.stream;
-        if (state.pending.length !== 0) {
+        if (state.nativeDecoder !== null) {
+            state.streaming = stream;
+            return decodeNative(bytes, state, stream);
+        }
+        if (state.nativeDecoder === null && state.pending.length !== 0) {
             bytes = concatBytes(state.pending, bytes);
             state.pending = new Uint8Array(0);
         }
 
-        if (stream) {
+        if (stream && state.nativeDecoder === null) {
             const pendingLength = trailingIncompleteLength(bytes, state.encoding);
             if (pendingLength !== 0) {
                 state.pending = bytes.slice(bytes.length - pendingLength);
@@ -248,9 +258,6 @@ export class TextDecoderStream extends streams.TransformStream {
         validateOptions(options);
         const encoding = normalizeLabel(label);
         const fatal = !!options?.fatal;
-        if (fatal) {
-            throw new ERR_NO_ICU('fatal');
-        }
 
         let decoder;
         super({

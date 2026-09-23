@@ -1,9 +1,13 @@
 use rquickjs::function::Args;
 use rquickjs::{Array, Ctx, FromJs, IntoJs, Object, Value};
 
+#[allow(dead_code)]
 pub const TAG: &str = "tag";
+#[allow(dead_code)]
 pub const VALUE: &str = "val";
+#[allow(dead_code)]
 const RESULT_OK: &str = "ok";
+#[allow(dead_code)]
 const RESULT_ERR: &str = "err";
 
 /// rquickjs supports passing tuples as arguments but only up to 8 elements. This wrapper

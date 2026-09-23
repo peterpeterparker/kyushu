@@ -34,7 +34,7 @@ pub mod golem_context {
 
     thread_local! {
         static SPANS: RefCell<HashMap<u32, Span>> = RefCell::new(HashMap::new());
-        static NEXT_HANDLE: RefCell<u32> = RefCell::new(1);
+        static NEXT_HANDLE: RefCell<u32> = const { RefCell::new(1) };
     }
 
     #[rquickjs::module]
