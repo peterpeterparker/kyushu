@@ -2,10 +2,8 @@ use crate::assets::Asset;
 use crate::worker::state::WorkerState;
 use anyhow::Result;
 use std::sync::Arc;
-use wasmtime::Engine;
 use wasmtime::component::{Linker, LinkerInstance, Resource, ResourceType, Val};
-use wasmtime_wasi::p2::add_to_linker_async;
-use wasmtime_wasi_http::p2::add_only_http_to_linker_async;
+use wasmtime::{Config, Engine};
 
 pub struct WorkerLinker {
     engine: Engine,
@@ -14,10 +12,17 @@ pub struct WorkerLinker {
 
 impl WorkerLinker {
     pub fn new() -> Result<Self> {
-        let engine = Engine::default();
+        // The worker is a WASI Preview 3 component (async exports, streams and futures).
+        let mut config = Config::new();
+        config.wasm_component_model_async(true);
+        let engine = Engine::new(&config)?;
 
         let mut linker: Linker<WorkerState> = Linker::new(&engine);
-        add_to_linker_async(&mut linker)?;
+
+        // Preview 2 remains required: Rust std on wasm32-wasip2 and parts of the runtime
+        // (e.g. the `utimes` family) still import the WASI 0.2 interfaces.
+        wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+        wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 
         Ok(Self { engine, linker })
     }
@@ -188,13 +193,13 @@ impl WorkerLinker {
         Ok(())
     }
 
-    /// Register `wasi:http` interfaces required by the worker component.
+    /// Register `wasi:http@0.3` interfaces required by the worker component.
     ///
-    /// Both `wasi:http/types` and `wasi:http/outgoing-handler` are always
-    /// registered. The component is built against `wasi:http/proxy` which
+    /// Both `wasi:http/types` and `wasi:http/client` are always
+    /// registered. The component is built against `wasi:http/service` which
     /// unconditionally imports both, even if the worker JS never calls `fetch`.
     pub fn with_http(mut self) -> Result<Self> {
-        add_only_http_to_linker_async(&mut self.linker)?;
+        wasmtime_wasi_http::p3::add_to_linker(&mut self.linker)?;
 
         Ok(self)
     }

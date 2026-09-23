@@ -1,19 +1,17 @@
-use crate::bindings::wasi::http::types::{
-    Fields, IncomingRequest, Method, OutgoingBody, OutgoingResponse, ResponseOutparam,
-};
+use crate::bindings::wasi::http::types::{ErrorCode, Fields, Method, Request, Response, Trailers};
+use crate::bindings::{wit_future, wit_stream};
 use crate::types::{Body, HttpMethod, JsRequest, JsResponse};
 use rquickjs::{CatchResultExt, IntoJs, Module};
+use wit_bindgen::rt::async_support::spawn_local;
 
-pub fn handle(request: IncomingRequest, response_out: ResponseOutparam) {
-    let js_request = extract_request(request);
-
-    let result = kyushu_runtime::internal::async_exported_function(run_js(js_request));
+pub async fn handle(request: Request) -> Result<Response, ErrorCode> {
+    let js_request = extract_request(request).await;
 
     let JsResponse {
         status,
         body,
         headers,
-    } = result.unwrap_or_else(|e| JsResponse {
+    } = run_js(js_request).await.unwrap_or_else(|e| JsResponse {
         status: 500,
         body: Some(Body::Text(format!("Error: {e}"))),
         headers: vec![],
@@ -24,29 +22,40 @@ pub fn handle(request: IncomingRequest, response_out: ResponseOutparam) {
         fields.append(k, v.as_bytes()).ok();
     }
 
-    let resp = OutgoingResponse::new(fields);
-    resp.set_status_code(status)
-        .expect("Failed to set status code");
+    // Dropping the trailers writer resolves the future to its default value: no trailers.
+    let (trailers_tx, trailers_rx) =
+        wit_future::new(|| Ok::<Option<Trailers>, ErrorCode>(None));
 
-    let body_out = resp.body().expect("Failed to get outgoing body");
-    ResponseOutparam::set(response_out, Ok(resp));
-
-    if let Some(body) = body {
-        let bytes = body.into_bytes();
-
-        // blocking_write_and_flush perform a write of up to 4096 bytes
-        // https://github.com/WebAssembly/wasi-io/blob/main/imports.md#methodoutput-streamblocking-write-and-flush-func
-        // https://github.com/bytecodealliance/wasmtime/issues/9653
-        let out = body_out.write().expect("Failed to get body write stream");
-        for chunk in bytes.chunks(4096) {
-            out.blocking_write_and_flush(chunk)
-                .expect("Failed to write body");
+    let (contents, body_tx) = match body {
+        Some(_) => {
+            let (body_tx, body_rx) = wit_stream::new::<u8>();
+            (Some(body_rx), Some(body_tx))
         }
+        None => (None, None),
+    };
 
-        drop(out);
+    // The returned future resolves to the result of the response transmission. There is
+    // nothing to do with it, so it is dropped.
+    let (resp, _transmit) = Response::new(fields, contents, trailers_rx);
+    resp.set_status_code(status)
+        .map_err(|_| ErrorCode::InternalError(Some(format!("Invalid status code {status}"))))?;
+
+    // Streams are unbuffered: a write only completes once the host reads it, and the host only
+    // starts reading after `handle` returned the response. Writing the body inline would
+    // therefore deadlock, so it is written by a task that continues after the export returns.
+    match (body, body_tx) {
+        (Some(body), Some(mut body_tx)) => {
+            spawn_local(async move {
+                // Remaining bytes are only returned if the host dropped the reader.
+                let _remaining = body_tx.write_all(body.into_bytes()).await;
+                drop(body_tx);
+                drop(trailers_tx);
+            });
+        }
+        _ => drop(trailers_tx),
     }
 
-    OutgoingBody::finish(body_out, None).expect("Failed to finish body");
+    Ok(resp)
 }
 
 fn method_to_string(method: Method) -> String {
@@ -64,14 +73,16 @@ fn method_to_string(method: Method) -> String {
     }
 }
 
-fn extract_request(request: IncomingRequest) -> JsRequest {
-    let method = HttpMethod::from(method_to_string(request.method()).as_str());
-    let path = request.path_with_query().unwrap_or_else(|| "/".to_string());
+async fn extract_request(request: Request) -> JsRequest {
+    let method = HttpMethod::from(method_to_string(request.get_method()).as_str());
+    let path = request
+        .get_path_with_query()
+        .unwrap_or_else(|| "/".to_string());
     let url = format!("http://localhost{path}");
 
     let headers: Vec<(String, String)> = request
-        .headers()
-        .entries()
+        .get_headers()
+        .copy_all()
         .into_iter()
         .filter_map(|(k, v)| String::from_utf8(v).ok().map(|v| (k, v)))
         .collect();
@@ -82,25 +93,21 @@ fn extract_request(request: IncomingRequest) -> JsRequest {
         Some(headers)
     };
 
-    let body = request.consume().ok().and_then(|incoming_body| {
-        let stream = incoming_body.stream().ok()?;
-        let mut bytes = Vec::new();
-        loop {
-            match stream.blocking_read(4096) {
-                Ok(chunk) if chunk.is_empty() => break,
-                Ok(chunk) => bytes.extend_from_slice(&chunk),
-                Err(_) => break,
-            }
+    // `res` communicates a request processing error back to the host. We never report one:
+    // dropping the writer resolves it to its default value, `Ok(())`.
+    let (res_tx, res_rx) = wit_future::new(|| Ok::<(), ErrorCode>(()));
+    let (body_rx, _trailers) = Request::consume_body(request, res_rx);
+    let bytes = body_rx.collect().await;
+    drop(res_tx);
+
+    let body = if bytes.is_empty() {
+        None
+    } else {
+        match String::from_utf8(bytes) {
+            Ok(s) => Some(Body::Text(s)),
+            Err(e) => Some(Body::Bytes(e.into_bytes())),
         }
-        if bytes.is_empty() {
-            None
-        } else {
-            match String::from_utf8(bytes) {
-                Ok(s) => Some(Body::Text(s)),
-                Err(e) => Some(Body::Bytes(e.into_bytes())),
-            }
-        }
-    });
+    };
 
     JsRequest {
         method,
@@ -111,7 +118,9 @@ fn extract_request(request: IncomingRequest) -> JsRequest {
 }
 
 async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
-    let js_state = kyushu_runtime::internal::get_js_state();
+    // The runtime was pre-initialized by Wizer (or by kyu-initialize in dev mode). This
+    // refreshes the process state (env, argv) on the first request and returns the shared state.
+    let js_state = kyushu_runtime::internal::ensure_initialized().await;
 
     let result = js_state
         .ctx

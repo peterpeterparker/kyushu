@@ -28,9 +28,9 @@ interface bundle {
 }
 
 world worker {
-  // Inherit all imports and exports from standard wasi:http proxy
+  // Inherit all imports and exports from standard wasi:http service
   // @see https://github.com/WebAssembly/WASI
-  include wasi:http/proxy@0.2.11;
+  include wasi:http/service@0.3.0;
 
   // Provides the JS bundle bytes during Wizer pre-initialization
   import bundle;

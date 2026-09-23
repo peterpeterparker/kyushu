@@ -1,7 +1,7 @@
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_wasi_http::p2::{WasiHttpCtxView, WasiHttpView, default_hooks};
+use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView, default_hooks};
 
 pub struct WorkerState {
     pub table: ResourceTable,

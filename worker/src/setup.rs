@@ -23,17 +23,11 @@ pub fn initialize() {
 
     // Must be called after registering modules and before the first request is served.
     //
-    // The polyfill's async runtime (QuickJS + wstd executor) must be fully initialized
-    // at Wizer time so that get_js_state() returns a ready state at runtime. Without
-    // this, any code that calls get_js_state() lazily — including built-ins like
-    // setTimeout — would trigger a nested block_on panic:
+    // The polyfill's async runtime (QuickJS) is fully initialized at Wizer time so that the
+    // snapshot already contains the evaluated modules. The runtime state is snapshotted as
+    // WizerPreInitialized and the first request only refreshes the process state (env, argv).
     //
-    // thread '<unnamed>' (1) panicked at /Users/daviddalbusco/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wstd-0.6.5/src/runtime/block_on.rs:17:9:
-    // cannot wstd::runtime::block_on inside an existing block_on!
-    // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-    // Error serving 127.0.0.1:64443: hyper::Error(User(Service), handler did not send a response)
-    //
-    // By initializing here, INIT_PHASE is snapshotted as WizerPreInitialized and
-    // async_exported_function() becomes the single block_on entry point per request.
-    kyushu_runtime::internal::wizer_initialize();
+    // `wizer_initialize` is async on WASI Preview 3 but this export is synchronous, so it is
+    // driven to completion with the runtime's self-contained `block_on`.
+    kyushu_runtime::internal::run_sync(kyushu_runtime::internal::wizer_initialize());
 }
