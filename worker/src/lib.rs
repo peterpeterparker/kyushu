@@ -1,5 +1,13 @@
 #[allow(warnings)]
-mod bindings;
+mod bindings {
+    // Generated from `wit/`. WIT dependencies are fetched into `wit/deps` with `wkg wit fetch`.
+    wit_bindgen::generate!({
+        path: "wit",
+        world: "kyushu:worker/worker",
+        runtime_path: "wit_bindgen_rt",
+        generate_all,
+    });
+}
 mod handler;
 mod runtime;
 mod setup;
