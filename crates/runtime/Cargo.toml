@@ -27,7 +27,6 @@ p2 = ["dep:wit-bindgen", "dep:wit-bindgen-rt", "dep:wasip2", "dep:wstd", "golem-
 # `rt.drive()` scheduler driver). P3 components import the residual P2 WASI surface for `std`
 # anyway, so this adds no new host requirements.
 p3 = ["dep:wit-bindgen-p3", "dep:wasip3", "dep:wasip2", "dep:http", "golem-websocket?/p3"]
-internal-test-execution = ["test-observability"]
 
 # Tier meta-features (cumulative). All Preview 2 tiers, since the Node.js builtin set they
 # enable is only compiled in the `p2` path.
@@ -79,20 +78,6 @@ crypto-full = [
 sqlite = ["dep:rusqlite"]
 timezone = ["dep:chrono-tz"]
 
-# TypeScript
-typescript-runtime = [
-    "dep:swc_common",
-    "dep:swc_ecma_ast",
-    "dep:swc_ecma_parser",
-    "dep:swc_ecma_visit",
-    "dep:swc_ts_fast_strip",
-]
-typescript-transform-runtime = ["typescript-runtime"]
-# Private test instrumentation. Individual test combinations opt into the
-# capabilities they observe; this umbrella is excluded from every runtime tier.
-test-observability = []
-typescript-compiler-profiling = ["typescript-transform-runtime", "test-observability"]
-
 # WebSocket support via the target-specific `golem:websocket@1.5.0` bindings.
 websocket = ["dep:golem-websocket"]
 
@@ -143,9 +128,6 @@ ecdsa = { version = "0.16", default-features = false, features = ["signing", "ve
 signature = { version = "2", optional = true }
 futures = { version = "0.3.31", features = [] }
 futures-concurrency = "7.6.3"
-indexmap = { version = "2", features = ["serde"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 url = "2.5.7"
 uuid = { version = "1.18.1", features = ["v4"] }
 rand = "0.9.2"
@@ -177,16 +159,6 @@ http = { version = "1", optional = true }
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
 chrono-tz = { version = "0.10", default-features = false, optional = true }
 unicode-segmentation = "1.12"
-
-# TypeScript
-swc_common = { version = "24.0.0", optional = true }
-# Direct dependencies for TypeScript-aware module-format classification. These
-# are also transitive dependencies of swc_ts_fast_strip, but this crate imports
-# their public APIs directly and must not rely on transitive visibility.
-swc_ecma_ast = { version = "27.0.0", optional = true }
-swc_ecma_parser = { version = "43.0.0", default-features = false, features = ["typescript"], optional = true }
-swc_ecma_visit = { version = "27.0.0", optional = true }
-swc_ts_fast_strip = { version = "56.0.0", optional = true }
 
 # HTTP
 golem-wasi-http = { version = "0.2.0", features = ["async"], optional = true }
