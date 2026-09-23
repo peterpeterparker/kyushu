@@ -6,7 +6,7 @@ resolver = "2"
 repository = "https://github.com/peterpeterparker/kyushu"
 
 [workspace.dependencies]
-rquickjs = { version = "0.12.0", features = ["macro", "futures", "std", "bindgen", "loader"] }
+rquickjs = { version = "0.12.2", features = ["macro", "futures", "std", "bindgen", "loader"] }
 
 # wstd is pinned in runtime source
 wstd = "=0.6.5"
