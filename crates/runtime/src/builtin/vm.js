@@ -3,7 +3,6 @@ import {
     eval_with_filename as evalWithFilename,
 } from '__wasm_rquickjs_builtin/vm_native';
 import * as pathModule from 'node:path';
-import { extractSourceMapURL } from '__wasm_rquickjs_builtin/internal/source_map_url';
 
 let contextIdCounter = 1;
 const contextIds = new WeakMap();
@@ -2656,6 +2655,88 @@ function rewriteDynamicImports(code, replacementOpenSource) {
     }
     if (last === 0) return { code, changed: false };
     return { code: out + code.slice(last), changed };
+}
+
+function extractSourceMapURL(code) {
+    const text = String(code);
+    let url;
+
+    if (text.indexOf('sourceMappingURL=') === -1) {
+        return undefined;
+    }
+
+    function isSourceMapURLSeparator(ch) {
+        return ch === 0x09 ||
+            ch === 0x0b ||
+            ch === 0x0c ||
+            ch === 0x20 ||
+            ch === 0xa0;
+    }
+
+    function scan(start, end) {
+        for (let i = start; i < end; i++) {
+            const ch = text.charCodeAt(i);
+            if (ch === 0x27 || ch === 0x22) {
+                i = skipStringLiteral(text, i, ch) - 1;
+                continue;
+            }
+            if (ch === 0x60) {
+                i++;
+                while (i < end) {
+                    const templateCh = text.charCodeAt(i);
+                    if (templateCh === 0x5c) {
+                        i += 2;
+                        continue;
+                    }
+                    if (templateCh === 0x60) break;
+                    if (templateCh === 0x24 && text.charCodeAt(i + 1) === 0x7b) {
+                        const expressionStart = i + 2;
+                        const expressionEnd = findTemplateExpressionEnd(text, expressionStart);
+                        if (expressionEnd === -1) return;
+                        scan(expressionStart, expressionEnd);
+                        i = expressionEnd + 1;
+                        continue;
+                    }
+                    i++;
+                }
+                continue;
+            }
+            if (ch === 0x2f && text.charCodeAt(i + 1) === 0x2a) {
+                i = skipWhitespaceAndComments(text, i) - 1;
+                continue;
+            }
+            if (ch !== 0x2f || text.charCodeAt(i + 1) !== 0x2f) {
+                if (ch === 0x2f && (regexCanFollow(text, i) || (regexCanFollowParen(text, i) && isLikelyRegexLiteral(text, i)))) {
+                    i = skipRegexLiteral(text, i) - 1;
+                }
+                continue;
+            }
+
+            const marker = text.charCodeAt(i + 2);
+            if (marker === 0x23 || marker === 0x40) {
+                const separator = text.charCodeAt(i + 3);
+                if (isSourceMapURLSeparator(separator) &&
+                    text.startsWith('sourceMappingURL=', i + 4)) {
+                    let lineEnd = i + 21;
+                    while (lineEnd < end) {
+                        const endChar = text.charCodeAt(lineEnd);
+                        if (endChar === 0x0a || endChar === 0x0d) break;
+                        lineEnd++;
+                    }
+                    const value = text.slice(i + 21, lineEnd).trim();
+                    if (value.length > 0) {
+                        url = value;
+                    }
+                }
+            }
+
+            i += 2;
+            while (i < end && text.charCodeAt(i) !== 0x0a && text.charCodeAt(i) !== 0x0d) i++;
+        }
+    }
+
+    scan(0, text.length);
+    return url;
 }
 
 export class Script {

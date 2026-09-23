@@ -91,11 +91,7 @@ export function startJavaScript(options) {
       stdout.end(); stderr.end(); forget_job(id);
       if (state.error !== null) rejectResult(new Error(state.error));
       else {
-        try {
-          const completed = { value: deserializeFromTransport(state.value), overflowed: state.overflowed };
-          if (state.profile !== undefined) completed.profile = state.profile;
-          resolveResult(completed);
-        }
+        try { resolveResult({ value: deserializeFromTransport(state.value), overflowed: state.overflowed }); }
         catch (error) { rejectResult(error); }
       }
     }

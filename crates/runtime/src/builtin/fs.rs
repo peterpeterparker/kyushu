@@ -227,13 +227,6 @@ fn with_fs_mut<R>(
     f(&mut services.fs.borrow_mut())
 }
 
-fn invalidate_module_resolution_probes(ctx: &rquickjs::Ctx<'_>) {
-    ctx.userdata::<crate::internal::runtime_services::RuntimeServices>()
-        .expect("runtime services not initialized")
-        .cjs_module_probe_session
-        .invalidate();
-}
-
 fn normalize_mode_override(mode: u32) -> u32 {
     mode & MODE_PERMISSION_MASK
 }
@@ -389,7 +382,6 @@ fn map_error_code(err: &std::io::Error) -> (&'static str, i32, &'static str) {
         std::io::ErrorKind::PermissionDenied => ("EACCES", -13, "permission denied"),
         std::io::ErrorKind::InvalidInput => ("EINVAL", -22, "invalid argument"),
         std::io::ErrorKind::NotADirectory => ("ENOTDIR", -20, "not a directory"),
-        std::io::ErrorKind::IsADirectory => ("EISDIR", -21, "illegal operation on a directory"),
         _ => {
             let err_text = err.to_string().to_lowercase();
             if err_text.contains("too many levels of symbolic links") || err_text.contains("eloop")
@@ -644,46 +636,6 @@ pub mod native_module {
     const MAX_STACK_DEPTH_FOR_READDIR: isize = 384;
     const STACK_DEPTH_SCAN_LIMIT: isize = 1024;
 
-    #[cfg(feature = "typescript-compiler-profiling")]
-    fn profile_fs(ctx: &Ctx<'_>, operation: &str, outcome: Option<&str>, bytes: usize) {
-        let profile = ctx
-            .userdata::<crate::internal::runtime_services::RuntimeServices>()
-            .expect("runtime services not initialized")
-            .execution_profile();
-        if let Some(profile) = profile {
-            profile.increment(&format!("filesystem.{operation}.calls"));
-            if let Some(outcome) = outcome {
-                profile.increment(&format!("filesystem.{operation}.{outcome}"));
-            }
-            if bytes > 0 {
-                profile.add(&format!("filesystem.{operation}.bytes"), bytes as u64);
-            }
-        }
-    }
-
-    #[cfg(feature = "typescript-compiler-profiling")]
-    fn profile_fs_entries(ctx: &Ctx<'_>, operation: &str, entries: usize) {
-        if entries == 0 {
-            return;
-        }
-        let profile = ctx
-            .userdata::<crate::internal::runtime_services::RuntimeServices>()
-            .expect("runtime services not initialized")
-            .execution_profile();
-        if let Some(profile) = profile {
-            profile.add(&format!("filesystem.{operation}.entries"), entries as u64);
-        }
-    }
-
-    #[cfg(feature = "typescript-compiler-profiling")]
-    fn fs_error_outcome(error: &std::io::Error) -> &'static str {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            "notFound"
-        } else {
-            "errors"
-        }
-    }
-
     fn runtime_path(ctx: &Ctx<'_>, path: &str) -> String {
         ctx.userdata::<crate::internal::runtime_services::RuntimeServices>()
             .expect("runtime services not initialized")
@@ -744,84 +696,6 @@ pub mod native_module {
     }
 
     #[rquickjs::function]
-    pub fn fs_read_file<'js>(
-        ctx: Ctx<'js>,
-        path: String,
-        max_length: f64,
-        decode_utf8: bool,
-    ) -> Object<'js> {
-        use std::io::Read;
-
-        let result = Object::new(ctx.clone()).unwrap();
-        if crate::internal::is_wizer_active() {
-            result
-                .set("error", super::wizer_enoent_obj(&ctx, "open", Some(&path)))
-                .unwrap();
-            return result;
-        }
-
-        let resolved_path = runtime_path(&ctx, &path);
-        let mut file = match std::fs::File::open(&resolved_path) {
-            Ok(file) => file,
-            Err(error) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "readFileNative", Some(fs_error_outcome(&error)), 0);
-                result
-                    .set(
-                        "error",
-                        super::make_fs_error(&ctx, &error, "open", Some(&path)),
-                    )
-                    .unwrap();
-                return result;
-            }
-        };
-        if let Ok(metadata) = file.metadata() {
-            if metadata.is_dir() {
-                let error = std::io::Error::from(std::io::ErrorKind::IsADirectory);
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "readFileNative", Some("errors"), 0);
-                result
-                    .set("error", super::make_fs_error(&ctx, &error, "read", None))
-                    .unwrap();
-                return result;
-            }
-            if metadata.len() > max_length as u64 {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "readFileNative", Some("tooLarge"), 0);
-                result.set("sizeTooLarge", metadata.len() as f64).unwrap();
-                return result;
-            }
-        }
-
-        let mut bytes = Vec::new();
-        match file.read_to_end(&mut bytes) {
-            Ok(_) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "readFileNative", Some("success"), bytes.len());
-                if decode_utf8 {
-                    let text = match String::from_utf8(bytes) {
-                        Ok(text) => text,
-                        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
-                    };
-                    result.set("text", text).unwrap();
-                } else {
-                    let typed_array = TypedArray::new_copy(ctx.clone(), &bytes)
-                        .expect("Failed to create TypedArray");
-                    result.set("buffer", typed_array).unwrap();
-                }
-            }
-            Err(error) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "readFileNative", Some(fs_error_outcome(&error)), 0);
-                result
-                    .set("error", super::make_fs_error(&ctx, &error, "read", None))
-                    .unwrap();
-            }
-        }
-        result
-    }
-
-    #[rquickjs::function]
     pub fn write_file_with_encoding(
         ctx: Ctx<'_>,
         path: String,
@@ -843,7 +717,6 @@ pub mod native_module {
             if let Err(err) = std::fs::write(&resolved_path, bytes) {
                 Some(format!("Failed to write file {path:?}: {err}"))
             } else {
-                super::invalidate_module_resolution_probes(&ctx);
                 None // Success
             }
         }
@@ -863,7 +736,6 @@ pub mod native_module {
             if let Err(err) = std::fs::write(&resolved_path, bytes) {
                 Some(format!("Failed to write file {path:?}: {err}"))
             } else {
-                super::invalidate_module_resolution_probes(&ctx);
                 None // Success
             }
         } else {
@@ -877,7 +749,6 @@ pub mod native_module {
         match std::fs::remove_file(Path::new(&fs_path)) {
             Ok(_) => {
                 super::remove_mode_override_for_path(&ctx, &fs_path);
-                super::invalidate_module_resolution_probes(&ctx);
                 None
             }
             Err(err) => Some(super::make_fs_error(&ctx, &err, "unlink", Some(&path))),
@@ -892,7 +763,6 @@ pub mod native_module {
             Ok(_) => {
                 super::move_mode_override_for_path(&ctx, &old_fs_path, &new_fs_path);
                 super::rename_fd_path(&ctx, &old_fs_path, &new_fs_path);
-                super::invalidate_module_resolution_probes(&ctx);
                 None
             }
             Err(err) => Some(super::make_fs_error_with_dest(
@@ -915,10 +785,7 @@ pub mod native_module {
             std::fs::create_dir(fs_path)
         };
         match result {
-            Ok(_) => {
-                super::invalidate_module_resolution_probes(&ctx);
-                None
-            }
+            Ok(_) => None,
             Err(err) => Some(format!("Failed to create directory {path:?}: {err}")),
         }
     }
@@ -965,8 +832,6 @@ pub mod native_module {
 
         match opts.open(&fs_path) {
             Ok(mut file) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "open", Some("success"), 0);
                 // If O_APPEND, seek to end
                 if flags & 1024 != 0 {
                     let _ = file.seek(SeekFrom::End(0));
@@ -976,7 +841,6 @@ pub mod native_module {
                 if creating {
                     super::set_mode_override_for_path(&ctx, &fs_path, mode as u32);
                     super::set_mode_override_for_fd(&ctx, fd, mode as u32);
-                    super::invalidate_module_resolution_probes(&ctx);
                 } else if let Some(mode_override) =
                     super::get_mode_override_for_path(&ctx, &fs_path)
                 {
@@ -985,8 +849,6 @@ pub mod native_module {
                 result.set("fd", fd).unwrap();
             }
             Err(err) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "open", Some(fs_error_outcome(&err)), 0);
                 result
                     .set(
                         "error",
@@ -1002,14 +864,10 @@ pub mod native_module {
     pub fn fs_close(ctx: Ctx<'_>, fd: i32) -> Option<Object<'_>> {
         let removed = super::with_fs_mut(&ctx, |fs| fs.files.remove(&fd));
         if removed.is_some() {
-            #[cfg(feature = "typescript-compiler-profiling")]
-            profile_fs(&ctx, "close", Some("success"), 0);
             super::forget_fd_path(&ctx, fd);
             super::remove_mode_override_for_fd(&ctx, fd);
             None
         } else {
-            #[cfg(feature = "typescript-compiler-profiling")]
-            profile_fs(&ctx, "close", Some("errors"), 0);
             Some(super::make_badf_error(&ctx, "close"))
         }
     }
@@ -1047,8 +905,6 @@ pub mod native_module {
                 let mut buf = vec![0u8; length];
                 match file.read(&mut buf) {
                     Ok(bytes_read) => {
-                        #[cfg(feature = "typescript-compiler-profiling")]
-                        profile_fs(&ctx, "read", Some("success"), bytes_read);
                         buf.truncate(bytes_read);
                         let typed_array = TypedArray::new_copy(ctx.clone(), &buf)
                             .expect("Failed to create TypedArray");
@@ -1056,8 +912,6 @@ pub mod native_module {
                         result.set("buffer", typed_array).unwrap();
                     }
                     Err(err) => {
-                        #[cfg(feature = "typescript-compiler-profiling")]
-                        profile_fs(&ctx, "read", Some(fs_error_outcome(&err)), 0);
                         result
                             .set("error", super::make_fs_error(&ctx, &err, "read", None))
                             .unwrap();
@@ -1065,8 +919,6 @@ pub mod native_module {
                 }
             }
             None => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "read", Some("errors"), 0);
                 result
                     .set("error", super::make_badf_error(&ctx, "read"))
                     .unwrap();
@@ -1269,8 +1121,6 @@ pub mod native_module {
 
         match std::fs::metadata(&fs_path) {
             Ok(meta) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "stat", Some("success"), 0);
                 let stat_obj = super::metadata_to_obj(&ctx, &meta);
                 if let Some(mode_override) = super::get_mode_override_for_path(&ctx, &fs_path) {
                     super::apply_mode_override_to_stat_obj(&stat_obj, mode_override);
@@ -1278,8 +1128,6 @@ pub mod native_module {
                 result.set("stat", stat_obj).unwrap();
             }
             Err(err) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "stat", Some(fs_error_outcome(&err)), 0);
                 result
                     .set(
                         "error",
@@ -1312,8 +1160,6 @@ pub mod native_module {
 
         match std::fs::symlink_metadata(&absolute_path) {
             Ok(meta) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "lstat", Some("success"), 0);
                 let stat_obj = super::metadata_to_obj(&ctx, &meta);
                 if let Some(mode_override) = super::get_mode_override_for_path(&ctx, &absolute_path)
                 {
@@ -1322,8 +1168,6 @@ pub mod native_module {
                 result.set("stat", stat_obj).unwrap();
             }
             Err(err) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "lstat", Some(fs_error_outcome(&err)), 0);
                 result
                     .set(
                         "error",
@@ -1353,8 +1197,6 @@ pub mod native_module {
         match table.files.get_mut(&fd) {
             Some(file) => match file.metadata() {
                 Ok(meta) => {
-                    #[cfg(feature = "typescript-compiler-profiling")]
-                    profile_fs(&ctx, "fstat", Some("success"), 0);
                     let stat_obj = super::metadata_to_obj(&ctx, &meta);
                     let mode_override = table.fd_mode_overrides.get(&fd).copied().or_else(|| {
                         table
@@ -1368,16 +1210,12 @@ pub mod native_module {
                     result.set("stat", stat_obj).unwrap();
                 }
                 Err(err) => {
-                    #[cfg(feature = "typescript-compiler-profiling")]
-                    profile_fs(&ctx, "fstat", Some(fs_error_outcome(&err)), 0);
                     result
                         .set("error", super::make_fs_error(&ctx, &err, "fstat", None))
                         .unwrap();
                 }
             },
             None => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "fstat", Some("errors"), 0);
                 result
                     .set("error", super::make_badf_error(&ctx, "fstat"))
                     .unwrap();
@@ -1437,15 +1275,8 @@ pub mod native_module {
                     }
                 }
                 result.set("entries", arr).unwrap();
-                #[cfg(feature = "typescript-compiler-profiling")]
-                {
-                    profile_fs(&ctx, "readdir", Some("success"), 0);
-                    profile_fs_entries(&ctx, "readdir", idx);
-                }
             }
             Err(err) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "readdir", Some(fs_error_outcome(&err)), 0);
                 result
                     .set(
                         "error",
@@ -1494,13 +1325,9 @@ pub mod native_module {
         let absolute_path = runtime_path(&ctx, &path);
         match super::canonicalize_guest_path(&absolute_path) {
             Ok(resolved_path) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "realpath", Some("success"), 0);
                 result.set("result", resolved_path).unwrap();
             }
             Err(err) => {
-                #[cfg(feature = "typescript-compiler-profiling")]
-                profile_fs(&ctx, "realpath", Some(fs_error_outcome(&err)), 0);
                 result
                     .set(
                         "error",
@@ -1532,10 +1359,7 @@ pub mod native_module {
         let fs_src = runtime_path(&ctx, &src);
         let fs_dest = runtime_path(&ctx, &dest);
         match std::fs::copy(&fs_src, &fs_dest) {
-            Ok(_) => {
-                super::invalidate_module_resolution_probes(&ctx);
-                None
-            }
+            Ok(_) => None,
             Err(err) => Some(super::make_fs_error_with_dest(
                 &ctx,
                 &err,
@@ -1551,10 +1375,7 @@ pub mod native_module {
         let fs_existing_path = runtime_path(&ctx, &existing_path);
         let fs_new_path = runtime_path(&ctx, &new_path);
         match std::fs::hard_link(&fs_existing_path, &fs_new_path) {
-            Ok(_) => {
-                super::invalidate_module_resolution_probes(&ctx);
-                None
-            }
+            Ok(_) => None,
             Err(err) => Some(super::make_fs_error_with_dest(
                 &ctx,
                 &err,
@@ -1573,10 +1394,7 @@ pub mod native_module {
 
         let fs_path = runtime_path(&ctx, &path);
         match super::symlink_at_path(&target, &fs_path) {
-            Ok(()) => {
-                super::invalidate_module_resolution_probes(&ctx);
-                None
-            }
+            Ok(()) => None,
             Err(err) => Some(super::make_fs_error_with_dest(
                 &ctx,
                 &err,
@@ -1754,7 +1572,6 @@ pub mod native_module {
                 if !recursive || !existed_before {
                     super::set_mode_override_for_path(&ctx, &fs_path, mode);
                 }
-                super::invalidate_module_resolution_probes(&ctx);
                 None
             }
             Err(err) => Some(super::make_fs_error(&ctx, &err, "mkdir", Some(&path))),
@@ -1767,7 +1584,6 @@ pub mod native_module {
         match std::fs::remove_dir(&fs_path) {
             Ok(_) => {
                 super::remove_mode_override_for_path(&ctx, &fs_path);
-                super::invalidate_module_resolution_probes(&ctx);
                 None
             }
             Err(err) => Some(super::make_fs_error(&ctx, &err, "rmdir", Some(&path))),
@@ -1786,18 +1602,9 @@ pub mod native_module {
                     } else {
                         std::fs::remove_dir(&fs_path)
                     };
-                    if recursive {
-                        // Recursive removal can delete some descendants before a later
-                        // entry fails, so its positive observations are stale even when
-                        // the overall operation returns an error.
-                        super::invalidate_module_resolution_probes(&ctx);
-                    }
                     match result {
                         Ok(_) => {
                             super::remove_mode_override_for_path(&ctx, &fs_path);
-                            if !recursive {
-                                super::invalidate_module_resolution_probes(&ctx);
-                            }
                             None
                         }
                         Err(err) => Some(super::make_fs_error(&ctx, &err, "rm", Some(&path))),
@@ -1806,7 +1613,6 @@ pub mod native_module {
                     match std::fs::remove_file(&fs_path) {
                         Ok(_) => {
                             super::remove_mode_override_for_path(&ctx, &fs_path);
-                            super::invalidate_module_resolution_probes(&ctx);
                             None
                         }
                         Err(err) => Some(super::make_fs_error(&ctx, &err, "rm", Some(&path))),
@@ -1845,7 +1651,6 @@ pub mod native_module {
 
         match std::fs::create_dir(&dir_path) {
             Ok(_) => {
-                super::invalidate_module_resolution_probes(&ctx);
                 result.set("result", guest_path).unwrap();
             }
             Err(err) => {
@@ -1886,7 +1691,6 @@ pub mod native_module {
                 if let Err(err) = f.write_all(bytes) {
                     Some(super::make_fs_error(&ctx, &err, "appendFile", Some(&path)))
                 } else {
-                    super::invalidate_module_resolution_probes(&ctx);
                     None
                 }
             }
@@ -1907,7 +1711,6 @@ pub mod native_module {
                 if let Err(err) = f.write_all(data.as_bytes()) {
                     Some(super::make_fs_error(&ctx, &err, "appendFile", Some(&path)))
                 } else {
-                    super::invalidate_module_resolution_probes(&ctx);
                     None
                 }
             }

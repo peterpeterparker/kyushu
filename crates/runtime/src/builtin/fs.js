@@ -889,27 +889,8 @@ export let readFileSync = function readFileSync(path, options) {
     }
 
     const flag = options && options.flag ? options.flag : 'r';
-    const numericFlag = flagsToNumber(flag);
-    if (numericFlag === 0) {
-        const fullPath = pathToString(path);
-        const nativeResult = native.fs_read_file(fullPath, kIoMaxLength, encoding === 'utf8');
-        if (nativeResult.error) {
-            throw createSystemError(nativeResult.error);
-        }
-        if (nativeResult.sizeTooLarge !== undefined) {
-            throw new ERR_FS_FILE_TOO_LARGE(nativeResult.sizeTooLarge);
-        }
-        if (nativeResult.text !== undefined) {
-            return nativeResult.text;
-        }
-        if (encoding) {
-            return decodeFileResult(nativeResult.buffer, encoding);
-        }
-        return getBuffer().from(nativeResult.buffer);
-    }
-    // Retain the descriptor path for custom flags so its flag and error
-    // semantics continue to match openSync + readSync.
-    const fd = openSync(path, numericFlag);
+    // Use openSync so readFile errors match Node's syscall/path metadata exactly.
+    const fd = openSync(path, flag);
     try {
         const statResult = native.fs_fstat(fd);
         if (!statResult.error) {

@@ -1207,7 +1207,7 @@ function getConstructorName(
         return null;
     }
 
-    const res = internalGetConstructorName(tmp);
+    const res = internalGetConstructorName(tmp, recurseTimes === 0);
 
     if (recurseTimes > ctx.depth && ctx.depth !== null) {
         return `${res} <Complex prototype>`;
@@ -1648,28 +1648,6 @@ function formatError(
                 });
             } catch {
                 // Best effort: some runtimes may refuse redefining stack.
-            }
-        }
-    }
-
-    // QuickJS prepares native Error stacks during construction, before a guest
-    // can replace `name`. Refresh only the recognizable native summary line so
-    // inspect() retains Node's current-name formatting without rewriting a
-    // manually assigned stack.
-    if (
-        typeof stack === "string" &&
-        nativeErrorConstructorNames.has(constructor) &&
-        codes.isPreparedNativeStack(err, stack)
-    ) {
-        const stackStart = stack.indexOf("\n    at");
-        if (stackStart !== -1) {
-            const initialHeader = stack.slice(0, stackStart);
-            const nativeHeader = err.message ? `${constructor}: ${err.message}` : constructor;
-            if (initialHeader === nativeHeader) {
-                const currentHeader = Error.prototype.toString.call(err);
-                if (typeof currentHeader === "string" && currentHeader !== initialHeader) {
-                    stack = currentHeader + stack.slice(stackStart);
-                }
             }
         }
     }

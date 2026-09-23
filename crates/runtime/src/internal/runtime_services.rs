@@ -3,81 +3,11 @@ use rquickjs::{
     AsyncContext, AsyncRuntime, CatchResultExt, Function, JsLifetime, Module, Value, async_with,
 };
 use std::cell::{Cell, RefCell};
-#[cfg(feature = "typescript-compiler-profiling")]
-use std::collections::BTreeMap;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
-#[cfg(feature = "typescript-compiler-profiling")]
-use std::time::{Duration, Instant};
-
-#[cfg(feature = "typescript-compiler-profiling")]
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct ExecutionProfileSnapshot {
-    pub(crate) version: u32,
-    pub(crate) phases_ms: BTreeMap<String, f64>,
-    pub(crate) total_ms: f64,
-    pub(crate) counters: BTreeMap<String, u64>,
-}
-
-#[cfg(feature = "typescript-compiler-profiling")]
-pub(crate) struct ExecutionProfile {
-    started: Instant,
-    last_phase: Cell<Instant>,
-    phases: RefCell<BTreeMap<String, Duration>>,
-    counters: RefCell<BTreeMap<String, u64>>,
-}
-
-#[cfg(feature = "typescript-compiler-profiling")]
-impl ExecutionProfile {
-    pub(crate) fn new(started: Instant) -> Self {
-        Self {
-            started,
-            last_phase: Cell::new(Instant::now()),
-            phases: RefCell::default(),
-            counters: RefCell::default(),
-        }
-    }
-
-    pub(crate) fn set_duration(&self, name: &str, duration: Duration) {
-        self.phases.borrow_mut().insert(name.to_string(), duration);
-    }
-
-    pub(crate) fn mark(&self, name: &str) {
-        let now = Instant::now();
-        self.set_duration(
-            name,
-            now.saturating_duration_since(self.last_phase.replace(now)),
-        );
-    }
-
-    pub(crate) fn increment(&self, name: &str) {
-        self.add(name, 1);
-    }
-
-    pub(crate) fn add(&self, name: &str, value: u64) {
-        let mut counters = self.counters.borrow_mut();
-        let counter = counters.entry(name.to_string()).or_default();
-        *counter = counter.saturating_add(value);
-    }
-
-    pub(crate) fn snapshot(&self) -> ExecutionProfileSnapshot {
-        let phases = self.phases.borrow();
-        let queue_delay = phases.get("queueDelay").copied().unwrap_or_default();
-        ExecutionProfileSnapshot {
-            version: 1,
-            phases_ms: phases
-                .iter()
-                .map(|(name, duration)| (name.clone(), duration.as_secs_f64() * 1000.0))
-                .collect(),
-            total_ms: (queue_delay + self.started.elapsed()).as_secs_f64() * 1000.0,
-            counters: self.counters.borrow().clone(),
-        }
-    }
-}
 
 /// Mutable services owned by one QuickJS runtime.
 ///
@@ -88,15 +18,12 @@ pub(crate) struct RuntimeServices {
     pub(crate) timers: TimerServices,
     pub(crate) node_package_deprecation_warnings: RefCell<HashSet<String>>,
     pub(crate) package_json_cache: super::module_loading::PackageJsonCache,
-    pub(crate) cjs_module_probe_session: super::module_loading::CjsModuleProbeSession,
     pub(crate) process: ProcessServices,
     pub(crate) fs: RefCell<FsServices>,
     output: RefCell<Rc<dyn RuntimeOutputSink>>,
     pub(crate) execution_jobs: RefCell<HashMap<usize, Rc<crate::builtin::execution::ExecutionJob>>>,
     pub(crate) next_execution_job_id: Cell<usize>,
     pub(crate) execution_enabled: Cell<bool>,
-    #[cfg(feature = "typescript-compiler-profiling")]
-    pub(crate) execution_profile: Option<Rc<ExecutionProfile>>,
 }
 
 impl Default for RuntimeServices {
@@ -105,15 +32,12 @@ impl Default for RuntimeServices {
             timers: TimerServices::default(),
             node_package_deprecation_warnings: RefCell::default(),
             package_json_cache: Default::default(),
-            cjs_module_probe_session: Default::default(),
             process: ProcessServices::default(),
             fs: RefCell::new(FsServices::default()),
             output: RefCell::new(Rc::new(ComponentOutputSink)),
             execution_jobs: RefCell::default(),
             next_execution_job_id: Cell::new(1),
             execution_enabled: Cell::new(true),
-            #[cfg(feature = "typescript-compiler-profiling")]
-            execution_profile: None,
         }
     }
 }
@@ -296,11 +220,6 @@ impl RuntimeServices {
     pub(crate) fn set_output_sink(&self, output: Rc<dyn RuntimeOutputSink>) {
         *self.output.borrow_mut() = output;
     }
-
-    #[cfg(feature = "typescript-compiler-profiling")]
-    pub(crate) fn execution_profile(&self) -> Option<Rc<ExecutionProfile>> {
-        self.execution_profile.clone()
-    }
 }
 
 /// A standalone QuickJS runtime with all context-local native services installed.
@@ -362,21 +281,6 @@ pub(crate) fn run_process_turn_checkpoint(ctx: &rquickjs::Ctx<'_>) -> rquickjs::
 
 impl OwnedJsRuntime {
     pub(crate) async fn new() -> Self {
-        Self::new_inner(
-            #[cfg(feature = "typescript-compiler-profiling")]
-            None,
-        )
-        .await
-    }
-
-    #[cfg(feature = "typescript-compiler-profiling")]
-    pub(crate) async fn new_profiled(profile: Rc<ExecutionProfile>) -> Self {
-        Self::new_inner(Some(profile)).await
-    }
-
-    async fn new_inner(
-        #[cfg(feature = "typescript-compiler-profiling")] profile: Option<Rc<ExecutionProfile>>,
-    ) -> Self {
         let rt = AsyncRuntime::new().expect("Failed to create AsyncRuntime");
         // QuickJS defines zero as unlimited. The component's shared wasm32
         // linear memory remains the outer bound, so do not impose a smaller
@@ -387,32 +291,13 @@ impl OwnedJsRuntime {
             .await
             .expect("Failed to create AsyncContext");
 
-        #[cfg(feature = "typescript-compiler-profiling")]
-        let stored_profile = profile.clone();
         async_with!(ctx => |ctx| {
-            let services = RuntimeServices::default();
-            #[cfg(feature = "typescript-compiler-profiling")]
-            let services = {
-                let mut services = services;
-                services.execution_profile = stored_profile;
-                services
-            };
-            ctx.store_userdata(services)
+            ctx.store_userdata(RuntimeServices::default())
                 .expect("Failed to initialize runtime services");
         })
         .await;
 
-        #[cfg(feature = "typescript-compiler-profiling")]
-        if let Some(profile) = &profile {
-            profile.mark("runtimeCreation");
-        }
-
         super::module_loading::initialize_module_loading(&rt, &ctx).await;
-
-        #[cfg(feature = "typescript-compiler-profiling")]
-        if let Some(profile) = &profile {
-            profile.mark("loaderInitialization");
-        }
 
         rt.set_host_promise_rejection_tracker(Some(Box::new(
             |ctx, promise, reason, is_handled| {
@@ -432,9 +317,8 @@ impl OwnedJsRuntime {
     /// Install the ordinary Node-compatible global environment without loading
     /// the generated component entry module or any generated WIT bridge state.
     pub(crate) async fn initialize_node_builtins(&self) -> Result<(), String> {
-        // In latest version of rquickjs Symbol.dispose are supported
-        // initialize_dispose_symbols(&self.ctx).await?;
-        // self.rt.idle().await;
+        initialize_dispose_symbols(&self.ctx).await?;
+        self.rt.idle().await;
         initialize_builtin_wiring(&self.ctx).await?;
         self.rt.idle().await;
         Ok(())
