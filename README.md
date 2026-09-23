@@ -19,7 +19,7 @@ Plus, find it fun to try to avoid using Node or Bun. Long story short, felt like
 
 Kyushu has two moving parts:
 
-**The worker** is a `wasm32-wasip2` component that embeds a QuickJS JavaScript runtime. When you run `kyu build`, your TypeScript or JavaScript entry point is bundled (via [Rolldown](https://rolldown.rs)) and pre-initialized into the worker using [Wizer](https://github.com/bytecodealliance/wizer). The resulting `.wasm` file contains your code, frozen in memory, ready to handle requests.
+**The worker** is a WebAssembly component that embeds a QuickJS JavaScript runtime. When you run `kyu build`, your TypeScript or JavaScript entry point is bundled (via [Rolldown](https://rolldown.rs)) and pre-initialized into the worker using [Wizer](https://github.com/bytecodealliance/wizer). The resulting `.wasm` file contains your code, frozen in memory, ready to handle requests.
 
 **The runner** (`kyu run`) is a Rust binary powered by [Wasmtime](https://wasmtime.io). It loads your built worker, spins up an HTTP server, and dispatches incoming requests into the Wasm sandbox. Your JavaScript runs inside the sandbox - isolated from the host filesystem and environment, except for what you explicitly allow via config.
 
