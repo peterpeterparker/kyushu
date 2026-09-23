@@ -90,10 +90,13 @@ impl JsState {
     /// Phase 2a: Initialize engine builtins — dispose symbols and builtin wiring.
     /// This can be pre-initialized by Wizer without user module code.
     async fn init_engine(&self) {
-        initialize_dispose_symbols(&self.ctx)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
-        self.rt.idle().await;
+        // Dispose symbols must be initialized before builtins, since builtin
+        // modules use [Symbol.dispose] in their class definitions.
+        // In latest version of rquickjs Symbol.dispose are supported
+        // initialize_dispose_symbols(&self.ctx)
+        //             .await
+        //             .unwrap_or_else(|error| panic!("{error}"));
+        // self.rt.idle().await;
 
         initialize_builtin_wiring(&self.ctx)
             .await

@@ -90,9 +90,12 @@ impl JsState {
     /// Must run before user module code so bundled CJS-in-ESM shims see
     /// `globalThis.require`, `Buffer`, `process`, timers, and related globals.
     async fn init_engine(&self) {
-        initialize_dispose_symbols(&self.ctx)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
+        // Dispose symbols must be initialized before builtins, since builtin
+        // modules use [Symbol.dispose] in their class definitions.
+        // In latest version of rquickjs Symbol.dispose are supported
+        // initialize_dispose_symbols(&self.ctx)
+        //             .await
+        //             .unwrap_or_else(|error| panic!("{error}"));
         async_with!(self.ctx => |ctx| {
             // Table holding live exported resource instances (see `RESOURCE_TABLE_NAME`). Must exist
             // before any exported resource is constructed or any resource handle is lowered to JS.
