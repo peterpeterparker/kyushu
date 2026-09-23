@@ -835,14 +835,14 @@ struct BrotliStream {
 #[cfg(feature = "brotli")]
 enum BrotliStreamKind {
     Compress {
-        compressor: Option<brotli::CompressorWriter<Vec<u8>>>,
+        compressor: Option<Box<brotli::CompressorWriter<Vec<u8>>>>,
         has_data: bool,
     },
     DecompressBuffering {
         buffer: Vec<u8>,
     },
     DecompressStreaming {
-        decompressor: brotli::Decompressor<Cursor<Vec<u8>>>,
+        decompressor: Box<brotli::Decompressor<Cursor<Vec<u8>>>>,
     },
 }
 
@@ -857,12 +857,12 @@ fn brotli_stream_new_impl(mode: u8, params_json: &str) -> Option<u32> {
             let quality = parse_brotli_quality(params_json);
             let lgwin = parse_brotli_lgwin(params_json);
             BrotliStreamKind::Compress {
-                compressor: Some(brotli::CompressorWriter::new(
+                compressor: Some(Box::new(brotli::CompressorWriter::new(
                     Vec::new(),
                     4096,
                     quality as u32,
                     lgwin as u32,
-                )),
+                ))),
                 has_data: false,
             }
         }
@@ -899,7 +899,7 @@ fn brotli_stream_push_impl(id: u32, data: &[u8], flush: u8) -> Option<Vec<u8>> {
                     if !data.is_empty() {
                         c.write_all(data).ok()?;
                     }
-                    let output = c.into_inner();
+                    let output = (*c).into_inner();
                     Some(output)
                 } else {
                     Some(Vec::new())
@@ -929,7 +929,9 @@ fn brotli_stream_push_impl(id: u32, data: &[u8], flush: u8) -> Option<Vec<u8>> {
                 let mut chunk = vec![0u8; chunk_size];
                 let n = decompressor.read(&mut chunk).ok()?;
                 chunk.truncate(n);
-                stream.kind = BrotliStreamKind::DecompressStreaming { decompressor };
+                stream.kind = BrotliStreamKind::DecompressStreaming {
+                    decompressor: Box::new(decompressor),
+                };
                 Some(chunk)
             } else {
                 Some(Vec::new())

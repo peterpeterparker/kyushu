@@ -318,61 +318,6 @@ function findGlobalConstructorNameByPrototype(value) {
     return "";
 }
 
-const inspectNewCallPattern = /\b(?:[A-Za-z_$][A-Za-z0-9_$]*\.)?inspect\s*\(\s*new\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/;
-const stackLocationPattern = /\(?(.+):(\d+):(\d+)\)?\s*$/;
-
-function inferConstructorNameFromCallsite() {
-    const currentModule = globalThis.__wasm_rquickjs_current_module;
-    if (
-        currentModule === undefined ||
-        currentModule === null ||
-        typeof currentModule.source !== "string"
-    ) {
-        return "";
-    }
-
-    let stack;
-    try {
-        stack = String(new Error().stack || "");
-    } catch {
-        return "";
-    }
-
-    const sourceLines = currentModule.source.split("\n");
-    const stackLines = stack.split("\n");
-    for (let i = stackLines.length - 1; i >= 1; i--) {
-        if (!stackLines[i].includes("anonymous (") && !stackLines[i].includes("<anonymous> (")) {
-            continue;
-        }
-
-        const locationMatch = stackLocationPattern.exec(stackLines[i]);
-        if (locationMatch === null) {
-            continue;
-        }
-
-        const lineNumber = Number(locationMatch[2]);
-        if (!Number.isInteger(lineNumber) || lineNumber < 1 || lineNumber > sourceLines.length) {
-            continue;
-        }
-
-        const snippet = [
-            sourceLines[lineNumber - 4],
-            sourceLines[lineNumber - 3],
-            sourceLines[lineNumber - 2],
-            sourceLines[lineNumber - 1],
-        ]
-            .filter((line) => typeof line === "string")
-            .join(" ");
-
-        const constructorMatch = inspectNewCallPattern.exec(snippet);
-        if (constructorMatch !== null) {
-            return constructorMatch[1];
-        }
-    }
-
-    return "";
-}
-
 function trackNullPrototypeConstructor(target, proto) {
     if (!isObjectLike(target)) {
         return;
@@ -420,7 +365,7 @@ Reflect.setPrototypeOf = function setPrototypeOf(target, proto) {
     }
 };
 
-export function getConstructorName(value, allowCallsiteFallback = false) {
+export function getConstructorName(value) {
     if (!isObjectLike(value)) {
         return "Object";
     }
@@ -443,16 +388,6 @@ export function getConstructorName(value, allowCallsiteFallback = false) {
     const globalConstructorName = findGlobalConstructorNameByPrototype(value);
     if (globalConstructorName !== "") {
         return globalConstructorName;
-    }
-
-    // QuickJS does not expose V8's hidden-class constructor-name recovery API.
-    // When inspecting `new Foo()` objects whose prototype was replaced with a
-    // null-prototype object, infer `Foo` from the user callsite as a fallback.
-    if (allowCallsiteFallback) {
-        const callsiteConstructorName = inferConstructorNameFromCallsite();
-        if (callsiteConstructorName !== "") {
-            return callsiteConstructorName;
-        }
     }
 
     return "Object";

@@ -767,16 +767,39 @@ EventEmitter.addAbortListener = function(signal, listener) {
     };
 };
 
+EventEmitter.prototype.constructor = EventEmitter;
 EventEmitter.EventEmitter = EventEmitter;
 
-const once = EventEmitter.once;
-const on = EventEmitter.on;
-const getEventListeners = EventEmitter.getEventListeners;
-const getMaxListeners = EventEmitter.getMaxListeners;
-const setMaxListeners = EventEmitter.setMaxListeners;
-const addAbortListener = EventEmitter.addAbortListener;
-const errorMonitor = EventEmitter.errorMonitor;
-const captureRejections = EventEmitter.captureRejections;
+const _default = EventEmitter;
+
+let once = EventEmitter.once;
+let on = EventEmitter.on;
+let getEventListeners = EventEmitter.getEventListeners;
+let getMaxListeners = EventEmitter.getMaxListeners;
+let setMaxListeners = EventEmitter.setMaxListeners;
+let addAbortListener = EventEmitter.addAbortListener;
+let errorMonitor = EventEmitter.errorMonitor;
+let captureRejections = EventEmitter.captureRejections;
+export let defaultMaxListeners = EventEmitter.defaultMaxListeners;
+
+const _syncBuiltinESMExportsRegistry = globalThis.__wasm_rquickjs_sync_builtin_esm_exports ||
+    Object.defineProperty(globalThis, '__wasm_rquickjs_sync_builtin_esm_exports', {
+        value: Object.create(null),
+        configurable: true,
+    }).__wasm_rquickjs_sync_builtin_esm_exports;
+
+_syncBuiltinESMExportsRegistry.events = function syncEventsBuiltinESMExports() {
+    EventEmitter = _default.EventEmitter;
+    once = _default.once;
+    on = _default.on;
+    getEventListeners = _default.getEventListeners;
+    getMaxListeners = _default.getMaxListeners;
+    setMaxListeners = _default.setMaxListeners;
+    addAbortListener = _default.addAbortListener;
+    errorMonitor = _default.errorMonitor;
+    captureRejections = _default.captureRejections;
+    defaultMaxListeners = _default.defaultMaxListeners;
+};
 
 export {
     EventEmitter,
@@ -794,4 +817,4 @@ export {
     _eventTrusted,
 };
 
-export default EventEmitter;
+export default _default;

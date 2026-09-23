@@ -1,15 +1,23 @@
 #[cfg(feature = "encoding")]
-use encoding_rs::{Encoding, UTF_8, UTF_16BE, UTF_16LE};
+use encoding_rs::{CoderResult, Decoder, DecoderResult, Encoding, UTF_8, UTF_16BE, UTF_16LE};
 use rquickjs::JsLifetime;
 use rquickjs::class::Trace;
+#[cfg(feature = "encoding")]
+use std::cell::RefCell;
 use std::ptr;
 use std::ptr::NonNull;
 
 #[rquickjs::module(rename = "camelCase")]
 pub mod native_module {
+    pub use super::NativeTextDecoder;
     use rquickjs::convert::Coerced;
     use rquickjs::prelude::*;
     use rquickjs::{Ctx, TypedArray};
+
+    #[rquickjs::function]
+    pub fn has_native_text_decoder() -> bool {
+        cfg!(feature = "encoding")
+    }
 
     #[rquickjs::function]
     pub fn supports_encoding(encoding: Coerced<String>) -> bool {
@@ -73,6 +81,97 @@ pub mod native_module {
             .as_raw()
             .expect("the UInt8Array passed to encodeInto is detached");
         super::encode_into_impl(&string, raw.len, raw.ptr)
+    }
+}
+
+#[cfg(feature = "encoding")]
+struct NativeDecoderState {
+    encoding: &'static Encoding,
+    ignore_bom: bool,
+    decoder: Decoder,
+}
+
+#[cfg(feature = "encoding")]
+impl NativeDecoderState {
+    fn new(encoding: &'static Encoding, ignore_bom: bool) -> Self {
+        let decoder = if ignore_bom {
+            encoding.new_decoder_without_bom_handling()
+        } else {
+            encoding.new_decoder_with_bom_removal()
+        };
+        Self {
+            encoding,
+            ignore_bom,
+            decoder,
+        }
+    }
+
+    fn reset(&mut self) {
+        *self = Self::new(self.encoding, self.ignore_bom);
+    }
+}
+
+#[derive(Trace, JsLifetime)]
+#[rquickjs::class]
+pub struct NativeTextDecoder {
+    #[cfg(feature = "encoding")]
+    #[qjs(skip_trace)]
+    inner: RefCell<NativeDecoderState>,
+}
+
+#[cfg(feature = "encoding")]
+#[rquickjs::methods]
+impl NativeTextDecoder {
+    #[qjs(constructor)]
+    pub fn new(
+        ctx: rquickjs::Ctx<'_>,
+        encoding: rquickjs::convert::Coerced<String>,
+        ignore_bom: bool,
+    ) -> rquickjs::Result<Self> {
+        let encoding = Encoding::for_label(encoding.0.as_bytes())
+            .ok_or_else(|| rquickjs::Exception::throw_message(&ctx, "Unsupported text encoding"))?;
+        Ok(Self {
+            inner: RefCell::new(NativeDecoderState::new(encoding, ignore_bom)),
+        })
+    }
+
+    pub fn decode(
+        &self,
+        bytes: rquickjs::TypedArray<'_, u8>,
+        stream: bool,
+        fatal: bool,
+    ) -> rquickjs::prelude::List<(Option<String>, Option<String>)> {
+        let Some(bytes) = bytes.as_bytes() else {
+            return rquickjs::prelude::List((Some(String::new()), None));
+        };
+        let mut state = self.inner.borrow_mut();
+        let capacity = if fatal {
+            state
+                .decoder
+                .max_utf8_buffer_length_without_replacement(bytes.len())
+        } else {
+            state.decoder.max_utf8_buffer_length(bytes.len())
+        }
+        .unwrap_or(0);
+        let mut output = String::with_capacity(capacity);
+        let malformed = if fatal {
+            let (result, _) =
+                state
+                    .decoder
+                    .decode_to_string_without_replacement(bytes, &mut output, !stream);
+            matches!(result, DecoderResult::Malformed(_, _))
+        } else {
+            let (result, _, _) = state.decoder.decode_to_string(bytes, &mut output, !stream);
+            matches!(result, CoderResult::OutputFull)
+        };
+        if !stream || malformed {
+            state.reset();
+        }
+        if malformed {
+            rquickjs::prelude::List((None, Some("Malformed input".to_string())))
+        } else {
+            rquickjs::prelude::List((Some(output), None))
+        }
     }
 }
 

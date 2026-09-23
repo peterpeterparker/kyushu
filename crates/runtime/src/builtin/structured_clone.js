@@ -57,7 +57,7 @@ const shouldSkip = ([TYPE, type]) => (
   (type === 'function' || type === 'symbol')
 );
 
-const serializer = (strict, json, $, _) => {
+const serializer = (strict, json, rejectCustom, $, _) => {
 
   const as = (out, value) => {
     const index = _.push(out) - 1;
@@ -69,8 +69,11 @@ const serializer = (strict, json, $, _) => {
     if ($.has(value))
       return $.get(value);
 
-    if (value && (typeof value === 'object' || typeof value === 'function') && typeof value[customCloneSymbol] === 'function')
+    if (value && (typeof value === 'object' || typeof value === 'function') && typeof value[customCloneSymbol] === 'function') {
+      if (rejectCustom)
+        throw new TypeError('execution results cannot contain resources');
       return as([CUSTOM, value[customCloneSymbol]()], value);
+    }
 
     let [TYPE, type] = typeOf(value);
     switch (TYPE) {
@@ -167,10 +170,42 @@ const serializer = (strict, json, $, _) => {
   return pair;
 };
 
-export const serialize = (value, {json, lossy} = {}) => {
+export const serialize = (value, {json, lossy, rejectCustom} = {}) => {
   const _ = [];
-  return serializer(!(json || lossy), !!json, new Map, _)(value), _;
+  return serializer(!(json || lossy), !!json, !!rejectCustom, new Map, _)(value), _;
 };
+
+const NUMBER_TRANSPORT_KEY = '__wasm_rquickjs_number_transport__';
+
+const transportReplacer = (_key, value) => {
+  if (typeof value !== 'number') return value;
+  if (Number.isNaN(value)) return {[NUMBER_TRANSPORT_KEY]: 'NaN'};
+  if (value === Infinity) return {[NUMBER_TRANSPORT_KEY]: 'Infinity'};
+  if (value === -Infinity) return {[NUMBER_TRANSPORT_KEY]: '-Infinity'};
+  if (Object.is(value, -0)) return {[NUMBER_TRANSPORT_KEY]: '-0'};
+  return value;
+};
+
+const transportReviver = (_key, value) => {
+  if (!value || typeof value !== 'object' ||
+      Object.keys(value).length !== 1 || !(NUMBER_TRANSPORT_KEY in value)) return value;
+  switch (value[NUMBER_TRANSPORT_KEY]) {
+    case 'NaN': return NaN;
+    case 'Infinity': return Infinity;
+    case '-Infinity': return -Infinity;
+    case '-0': return -0;
+    default: return value;
+  }
+};
+
+// The structured representation itself is acyclic, but JSON is not lossless for
+// all JavaScript numbers. Keep the transport encoding beside the serializer so
+// every cross-runtime caller shares the same representation.
+export const serializeForTransport = (value, options) =>
+  JSON.stringify(serialize(value, options), transportReplacer);
+
+export const deserializeFromTransport = serialized =>
+  deserialize(JSON.parse(serialized, transportReviver));
 
 const env = globalThis;
 

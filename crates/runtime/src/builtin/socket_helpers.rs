@@ -117,6 +117,20 @@ pub fn error_code_to_errno(error: &ErrorCode) -> &'static str {
     }
 }
 
+#[cfg(feature = "p2")]
+pub fn stream_error_to_errno(debug_message: &str) -> &'static str {
+    let message = debug_message.to_ascii_lowercase();
+    if message.contains("connection reset") || message.contains("connection-reset") {
+        "ECONNRESET"
+    } else if message.contains("connection aborted") || message.contains("connection-aborted") {
+        "ECONNABORTED"
+    } else if message.contains("timed out") || message.contains("timeout") {
+        "ETIMEDOUT"
+    } else {
+        "EIO"
+    }
+}
+
 pub fn throw_socket_error(
     ctx: &Ctx<'_>,
     code: &str,

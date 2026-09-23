@@ -29,6 +29,8 @@ use std::fmt::Write;
 
 #[path = "builtin/abort_controller.rs"]
 mod abort_controller;
+#[path = "builtin/abort_signal.rs"]
+mod abort_signal;
 #[path = "builtin/assert.rs"]
 mod assert;
 #[path = "builtin/async_hooks.rs"]
@@ -57,6 +59,8 @@ mod domain;
 mod encoding;
 #[path = "builtin/events.rs"]
 mod events;
+#[path = "builtin/execution.rs"]
+pub(crate) mod execution;
 #[path = "builtin/formdata_node.rs"]
 mod formdata_node;
 #[path = "builtin/fs.rs"]
@@ -67,6 +71,8 @@ mod gc;
 mod http;
 #[path = "builtin/http2.rs"]
 mod http2;
+#[path = "builtin/http_body_p3.rs"]
+mod http_body;
 #[path = "builtin/https.rs"]
 mod https;
 #[path = "builtin/ieee754.rs"]
@@ -103,6 +109,8 @@ mod querystring;
 mod readline;
 #[path = "builtin/repl.rs"]
 mod repl;
+#[path = "builtin/shared_response_body.rs"]
+mod shared_response_body;
 #[path = "builtin/socket_helpers.rs"]
 mod socket_helpers;
 #[cfg(feature = "sqlite")]
@@ -131,6 +139,8 @@ mod tls;
 mod trace_events;
 #[path = "builtin/tty.rs"]
 mod tty;
+#[path = "builtin/typescript.rs"]
+mod typescript;
 #[path = "builtin/url.rs"]
 mod url;
 #[path = "builtin/util.rs"]
@@ -169,6 +179,13 @@ mod zlib {
 #[path = "builtin/websocket.rs"]
 mod websocket;
 
+pub(crate) fn realpath_for_module_resolution(
+    ctx: &rquickjs::Ctx<'_>,
+    path: &str,
+) -> Option<String> {
+    fs::realpath_for_module_resolution(ctx, path)
+}
+
 /// Registers builtin native and JavaScript module names with the resolver.
 pub fn add_module_resolvers(
     resolver: rquickjs::loader::BuiltinResolver,
@@ -192,7 +209,9 @@ pub fn add_module_resolvers(
         .with_module("__wasm_rquickjs_builtin/intl_native")
         .with_module("__wasm_rquickjs_builtin/intl")
         .with_module("node:util")
+        .with_module("node:util/types")
         .with_module("util")
+        .with_module("util/types")
         .with_module("node:buffer")
         .with_module("buffer")
         .with_module("base64-js")
@@ -279,6 +298,7 @@ pub fn add_module_resolvers(
         .with_module("node:inspector")
         .with_module("inspector")
         .with_module("__wasm_rquickjs_builtin/node_http_native")
+        .with_module("__wasm_rquickjs_builtin/node_http_incoming")
         .with_module("__wasm_rquickjs_builtin/node_http_server")
         .with_module("node:_http_common")
         .with_module("_http_common")
@@ -313,6 +333,7 @@ pub fn add_module_resolvers(
         .with_module("tty")
         .with_module("node:v8")
         .with_module("v8")
+        .with_module("__wasm_rquickjs_builtin/v8_native")
         .with_module("node:worker_threads")
         .with_module("worker_threads")
         .with_module("__wasm_rquickjs_builtin/zlib_native")
@@ -321,6 +342,11 @@ pub fn add_module_resolvers(
         // SQLite - only node:sqlite, no bare "sqlite" (matches Node.js behavior)
         .with_module("__wasm_rquickjs_builtin/sqlite_native")
         .with_module("node:sqlite");
+
+    let resolver = resolver
+        .with_module("__wasm_rquickjs_builtin/execution_native")
+        .with_module("wasm-rquickjs:execution")
+        .with_module("__wasm_rquickjs_builtin/typescript_native");
 
     #[cfg(feature = "golem")]
     let resolver = resolver
@@ -383,6 +409,7 @@ pub fn module_loader() -> (
             web_crypto::js_native_module,
         )
         .with_module("__wasm_rquickjs_builtin/vm_native", vm::js_native_module)
+        .with_module("__wasm_rquickjs_builtin/v8_native", v8::js_native_module)
         .with_module(
             "__wasm_rquickjs_builtin/string_decoder_native",
             string_decoder::js_native_module,
@@ -406,6 +433,15 @@ pub fn module_loader() -> (
             "__wasm_rquickjs_builtin/sqlite_native",
             sqlite::js_native_module,
         );
+
+    let native_loader = native_loader.with_module(
+        "__wasm_rquickjs_builtin/execution_native",
+        execution::js_native_module,
+    );
+    let native_loader = native_loader.with_module(
+        "__wasm_rquickjs_builtin/typescript_native",
+        typescript::js_native_module,
+    );
 
     #[cfg(feature = "golem")]
     let native_loader = native_loader.with_module(
@@ -441,7 +477,9 @@ pub fn module_loader() -> (
         .with_module("__wasm_rquickjs_builtin/encoding", encoding::ENCODING_JS)
         .with_module("__wasm_rquickjs_builtin/intl", intl::INTL_JS)
         .with_module("node:util", util::UTIL_JS)
-        .with_module("util", util::REEXPORT_JS)
+        .with_module("node:util/types", util::UTIL_TYPES_JS)
+        .with_module("util", util::BARE_UTIL_REEXPORT_JS)
+        .with_module("util/types", util::UTIL_TYPES_JS)
         .with_module("base64-js", base64::BASE64_JS)
         .with_module("ieee754", ieee754::IEEE754_JS)
         .with_module("node:buffer", buffer::BUFFER_JS)
@@ -524,6 +562,10 @@ pub fn module_loader() -> (
         .with_module("node:domain", domain::DOMAIN_JS)
         .with_module("domain", domain::REEXPORT_JS)
         .with_module(
+            "__wasm_rquickjs_builtin/node_http_incoming",
+            node_http::HTTP_INCOMING_JS,
+        )
+        .with_module(
             "__wasm_rquickjs_builtin/node_http_server",
             node_http::NODE_HTTP_SERVER_JS,
         )
@@ -564,6 +606,9 @@ pub fn module_loader() -> (
         .with_module("node:zlib", zlib::ZLIB_JS)
         .with_module("zlib", zlib::REEXPORT_JS)
         .with_module("node:sqlite", sqlite::SQLITE_JS);
+
+    let builtin_loader =
+        builtin_loader.with_module("wasm-rquickjs:execution", execution::EXECUTION_JS);
 
     #[cfg(feature = "golem")]
     let builtin_loader = builtin_loader.with_module(

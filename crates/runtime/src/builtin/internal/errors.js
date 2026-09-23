@@ -14,52 +14,203 @@ import { inspect, format } from "__wasm_rquickjs_builtin/internal/util/inspect";
 const _callSiteWithFnPattern = /^\s*at\s+(.+?)\s+\((.+):(\d+):(\d+)\)\s*$/;
 const _callSiteNoFnPattern = /^\s*at\s+(.+):(\d+):(\d+)\s*$/;
 
-function _makeCallSite(functionName, fileName, lineNumber, columnNumber) {
+function _isInternalErrorFrame(fileName) {
+    return fileName === '__wasm_rquickjs_builtin/internal/errors';
+}
+
+function _isInternalErrorStackLine(line) {
+    return /^\s*at construct \(native\)\s*$/.test(line);
+}
+
+function _remapSourceMappedLocation(fileName, lineNumber, columnNumber) {
+    const mapper = globalThis.__wasm_rquickjs_remap_source_mapped_position;
+    if (typeof mapper !== 'function') return undefined;
+    try {
+        return mapper(fileName, lineNumber, columnNumber);
+    } catch {
+        return undefined;
+    }
+}
+
+function _remapSourceMappedStack(stackString) {
+    if (typeof stackString !== 'string') return stackString;
+    if (globalThis.__wasm_rquickjs_suppress_source_map_stack === true) return stackString;
+    const lines = stackString.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (_isInternalErrorStackLine(line)) {
+            lines.splice(i, 1);
+            i -= 1;
+            continue;
+        }
+        let match = line.match(_callSiteWithFnPattern);
+        let fileName;
+        let lineNumber;
+        let columnNumber;
+        if (match) {
+            fileName = match[2];
+            lineNumber = parseInt(match[3], 10);
+            columnNumber = parseInt(match[4], 10);
+        } else {
+            match = line.match(_callSiteNoFnPattern);
+            if (!match) continue;
+            fileName = match[1];
+            lineNumber = parseInt(match[2], 10);
+            columnNumber = parseInt(match[3], 10);
+        }
+        if (_isInternalErrorFrame(fileName)) {
+            lines.splice(i, 1);
+            i -= 1;
+            continue;
+        }
+        const origin = _remapSourceMappedLocation(fileName, lineNumber, columnNumber);
+        if (!origin || typeof origin.fileName !== 'string') continue;
+        const location = `${fileName}:${lineNumber}:${columnNumber}`;
+        const offset = line.lastIndexOf(location);
+        if (offset === -1) continue;
+        const mapped = `${origin.fileName}:${origin.lineNumber}:${origin.columnNumber}`;
+        lines[i] = line.slice(0, offset) + mapped + line.slice(offset + location.length);
+    }
+    return lines.join('\n');
+}
+
+function _formatNativeCallSites(error, callSites) {
+    if (!Array.isArray(callSites)) return '';
+    let header;
+    try {
+        header = nativeErrorToString.call(error);
+    } catch {
+        header = 'Error';
+    }
+    const lines = [header];
+    for (const callSite of callSites) {
+        let functionName;
+        let fileName;
+        let lineNumber;
+        let columnNumber;
+        try {
+            functionName = callSite.getFunctionName();
+            if (!functionName && typeof callSite.getMethodName === 'function') {
+                functionName = callSite.getMethodName();
+            }
+            fileName = callSite.getFileName();
+            lineNumber = callSite.getLineNumber();
+            columnNumber = callSite.getColumnNumber();
+        } catch {
+            continue;
+        }
+        let text;
+        if (fileName) {
+            const location = `${fileName}:${lineNumber}:${columnNumber}`;
+            text = functionName ? `${functionName} (${location})` : location;
+        } else {
+            let isNative = false;
+            try {
+                isNative = callSite.isNative();
+            } catch {
+                // Use the generic fallback below.
+            }
+            text = functionName || '<anonymous>';
+            if (isNative) text += ' (native)';
+        }
+        lines.push(`    at ${text}`);
+    }
+    return lines.join('\n');
+}
+
+function _prepareSourceMappedStack(error, callSites) {
+    return _remapSourceMappedStack(_formatNativeCallSites(error, callSites));
+}
+
+const nativeCallSiteCaptures = new WeakMap();
+
+function _captureNativeCallSites(error, callSites) {
+    if (error && (typeof error === 'object' || typeof error === 'function')) {
+        nativeCallSiteCaptures.set(error, callSites);
+    }
+    return '';
+}
+
+function _takeNativeCallSites(error) {
+    const callSites = nativeCallSiteCaptures.get(error);
+    if (!callSites) return undefined;
+    nativeCallSiteCaptures.delete(error);
+    return callSites;
+}
+
+Object.defineProperty(globalThis, '__wasm_rquickjs_remap_source_mapped_stack', {
+    value: _remapSourceMappedStack,
+    writable: false,
+    configurable: false,
+});
+
+function _callSiteMethod(callSite, name, fallback) {
+    if (callSite && typeof callSite[name] === 'function') {
+        try {
+            return callSite[name]();
+        } catch {
+            // Use the compatibility fallback below.
+        }
+    }
+    return fallback;
+}
+
+function _makeCallSite(functionName, fileName, lineNumber, columnNumber, callSite) {
     return {
-        getThis() { return undefined; },
-        getTypeName() { return null; },
-        getFunction() { return undefined; },
+        getThis() { return _callSiteMethod(callSite, 'getThis', undefined); },
+        getTypeName() { return _callSiteMethod(callSite, 'getTypeName', null); },
+        getFunction() { return _callSiteMethod(callSite, 'getFunction', undefined); },
         getFunctionName() { return functionName || null; },
-        getMethodName() { return null; },
+        getMethodName() { return _callSiteMethod(callSite, 'getMethodName', null); },
         getFileName() { return fileName || null; },
         getLineNumber() { return lineNumber | 0; },
         getColumnNumber() { return columnNumber | 0; },
-        getEvalOrigin() { return undefined; },
-        isToplevel() { return true; },
-        isEval() { return false; },
-        isNative() { return false; },
-        isConstructor() { return false; },
-        isAsync() { return false; },
-        isPromiseAll() { return false; },
-        getPromiseIndex() { return null; },
+        getEvalOrigin() { return _callSiteMethod(callSite, 'getEvalOrigin', undefined); },
+        isToplevel() { return _callSiteMethod(callSite, 'isToplevel', true); },
+        isEval() { return _callSiteMethod(callSite, 'isEval', false); },
+        isNative() { return _callSiteMethod(callSite, 'isNative', false); },
+        isConstructor() { return _callSiteMethod(callSite, 'isConstructor', false); },
+        isAsync() { return _callSiteMethod(callSite, 'isAsync', false); },
+        isPromiseAll() { return _callSiteMethod(callSite, 'isPromiseAll', false); },
+        getPromiseIndex() { return _callSiteMethod(callSite, 'getPromiseIndex', null); },
         getScriptNameOrSourceURL() { return fileName || null; },
         toString() {
-            const name = functionName || '<anonymous>';
             if (fileName) {
-                return `${name} (${fileName}:${lineNumber}:${columnNumber})`;
+                const location = `${fileName}:${lineNumber}:${columnNumber}`;
+                return functionName ? `${functionName} (${location})` : location;
+            }
+            const name = functionName || '<anonymous>';
+            if (_callSiteMethod(callSite, 'isNative', false)) {
+                return `${name} (native)`;
             }
             return name;
         },
     };
 }
 
-function _parseStackStringToCallSites(stackString) {
-    if (typeof stackString !== 'string') return [];
-    const lines = stackString.split('\n');
-    const sites = [];
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        let m = line.match(_callSiteWithFnPattern);
-        if (m) {
-            sites.push(_makeCallSite(m[1], m[2], parseInt(m[3], 10), parseInt(m[4], 10)));
-            continue;
+function _toCompatibleCallSite(callSite) {
+    let functionName;
+    let fileName;
+    let lineNumber;
+    let columnNumber;
+    try {
+        functionName = callSite.getFunctionName();
+        if (!functionName && typeof callSite.getMethodName === 'function') {
+            functionName = callSite.getMethodName();
         }
-        m = line.match(_callSiteNoFnPattern);
-        if (m) {
-            sites.push(_makeCallSite(null, m[1], parseInt(m[2], 10), parseInt(m[3], 10)));
-        }
+        fileName = callSite.getFileName();
+        lineNumber = callSite.getLineNumber();
+        columnNumber = callSite.getColumnNumber();
+    } catch {
+        // Return a complete neutral CallSite when the native object is partial.
     }
-    return sites;
+    return _makeCallSite(
+        functionName,
+        fileName,
+        lineNumber,
+        columnNumber,
+        callSite,
+    );
 }
 
 // Helper to create property descriptors immune to Object.prototype pollution.
@@ -75,224 +226,111 @@ function _dataDesc(value) {
     return d;
 }
 
-// Normalize `Error.prototype.stack` so deleting an instance stack works like
-// Node (i.e. `delete err.stack` makes subsequent `err.stack` reads undefined).
-const nativeErrorStackDescriptor = Object.getOwnPropertyDescriptor(Error.prototype, "stack");
 const NativeError = Error;
-const nativeErrorToString = Error.prototype.toString;
-const materializedErrorStacks = new WeakSet();
+const nativeErrorToString = NativeError.prototype.toString;
+const nativeErrorPrepareStackTraceDescriptor = Object.getOwnPropertyDescriptor(
+    NativeError,
+    "prepareStackTrace",
+);
+const nativeErrorCaptureStackTrace = NativeError.captureStackTrace;
+const initialPublicPrepareStackTrace = NativeError.prepareStackTrace;
+const preparedNativeStacks = new WeakMap();
 
-function materializeOwnStack(errorInstance) {
-    if (!errorInstance || (typeof errorInstance !== "object" && typeof errorInstance !== "function")) {
-        return;
-    }
-
-    const own = Object.getOwnPropertyDescriptor(errorInstance, "stack");
-    if (own && Object.prototype.hasOwnProperty.call(own, "value") && own.configurable === true) {
-        materializedErrorStacks.add(errorInstance);
-        return;
-    }
-
-    let stackValue;
-    try {
-        if (own && typeof own.get === "function") {
-            stackValue = own.get.call(errorInstance);
-        } else if (nativeErrorStackDescriptor && typeof nativeErrorStackDescriptor.get === "function") {
-            stackValue = nativeErrorStackDescriptor.get.call(errorInstance);
-        } else if (nativeErrorStackDescriptor && Object.prototype.hasOwnProperty.call(nativeErrorStackDescriptor, "value")) {
-            stackValue = nativeErrorStackDescriptor.value;
-        }
-    } catch {
-        stackValue = undefined;
-    }
-
-    if (stackValue === undefined || stackValue === "") {
-        try {
-            stackValue = nativeErrorToString.call(errorInstance);
-        } catch {
-            stackValue = undefined;
-        }
-    }
-
-    try {
-        Object.defineProperty(errorInstance, "stack", _dataDesc(stackValue));
-        materializedErrorStacks.add(errorInstance);
-    } catch {
-        // Best effort only.
-    }
+export function isPreparedNativeStack(error, stack) {
+    return error !== null &&
+        (typeof error === 'object' || typeof error === 'function') &&
+        preparedNativeStacks.get(error) === stack;
 }
 
-function installErrorStackShimForNonConfigurablePrototype() {
-    const ErrorShimPrototype = Object.create(NativeError.prototype);
+function _dispatchPrepareStackTrace(error, callSites) {
+    if (error && (typeof error === 'object' || typeof error === 'function') &&
+        preparedNativeStacks.has(error)) {
+        return preparedNativeStacks.get(error);
+    }
+    const prepare = NativeError.prepareStackTrace;
+    const result = typeof prepare === 'function'
+        ? prepare(error, callSites.map(_toCompatibleCallSite))
+        : _prepareSourceMappedStack(error, callSites);
+    if (error && (typeof error === 'object' || typeof error === 'function')) {
+        preparedNativeStacks.set(error, result);
+    }
+    return result;
+}
 
-    Object.defineProperty(ErrorShimPrototype, "stack", {
-        configurable: true,
-        enumerable: false,
-        get() {
-            const own = Object.getOwnPropertyDescriptor(this, "stack");
-            if (!own) {
-                return undefined;
-            }
-            if (Object.prototype.hasOwnProperty.call(own, "value")) {
-                return own.value;
-            }
-            if (typeof own.get === "function") {
-                return own.get.call(this);
-            }
-            return undefined;
-        },
-        set(value) {
-            Object.defineProperty(this, "stack", _dataDesc(value));
-        },
-    });
-
-    const ErrorShim = function Error() {
-        const ctorTarget = new.target || ErrorShim;
-        const errorInstance = Reflect.construct(NativeError, arguments, NativeError);
-        materializeOwnStack(errorInstance);
-
-        // Error.prepareStackTrace support (V8 compat).
-        // Replace the materialized .stack data property with a lazy getter that
-        // checks Error.prepareStackTrace on first access, then materializes the
-        // result as a plain data property so subsequent reads have no overhead.
-        const rawStack = errorInstance.stack;
-        Object.defineProperty(errorInstance, "stack", {
-            get() {
-                const prepareStackTrace = globalThis.Error && globalThis.Error.prepareStackTrace;
-                const result = typeof prepareStackTrace === "function"
-                    ? prepareStackTrace(errorInstance, _parseStackStringToCallSites(rawStack))
-                    : rawStack;
-                Object.defineProperty(errorInstance, "stack", _dataDesc(result));
-                return result;
-            },
-            set(value) {
-                Object.defineProperty(errorInstance, "stack", _dataDesc(value));
-            },
-            configurable: true,
-            enumerable: false,
-        });
-
-        const targetPrototype = (ctorTarget && ctorTarget.prototype) || ErrorShimPrototype;
-        if (Object.getPrototypeOf(errorInstance) !== targetPrototype) {
-            Object.setPrototypeOf(errorInstance, targetPrototype);
-        }
-
-        return errorInstance;
-    };
-
-    Object.setPrototypeOf(ErrorShim, NativeError);
-    ErrorShim.prototype = ErrorShimPrototype;
-    Object.defineProperty(ErrorShimPrototype, "constructor", {
-        value: NativeError,
+if (nativeErrorPrepareStackTraceDescriptor &&
+    typeof nativeErrorPrepareStackTraceDescriptor.set === 'function') {
+    // Keep QuickJS's eager native backtrace construction behind a stable hidden
+    // dispatcher. The public property remains an ordinary Node-shaped data
+    // property, so defineProperty(), delete, seal, and freeze need no proxy
+    // synchronization. Explicit captureStackTrace below supplies Node's lazy
+    // hook selection; ordinary Error construction retains QuickJS's eager
+    // prepare timing.
+    Object.defineProperty(NativeError, 'prepareStackTrace', {
+        value: initialPublicPrepareStackTrace,
         writable: true,
         configurable: true,
         enumerable: false,
     });
-
-    Object.defineProperty(ErrorShim, Symbol.hasInstance, {
-        value(value) {
-            return value instanceof NativeError;
-        },
-        configurable: true,
-    });
-
-    globalThis.Error = ErrorShim;
+    nativeErrorPrepareStackTraceDescriptor.set.call(
+        NativeError,
+        _dispatchPrepareStackTrace,
+    );
 }
 
-if (nativeErrorStackDescriptor && nativeErrorStackDescriptor.configurable === false) {
-    try {
-        installErrorStackShimForNonConfigurablePrototype();
-    } catch {
-        // Keep the runtime default behavior if shimming fails.
-    }
-} else {
-    try {
-        Object.defineProperty(Error.prototype, "stack", {
-            configurable: true,
-            enumerable: false,
-            get: function getErrorStack() {
-                if (this === Error.prototype) {
-                    return undefined;
-                }
-
-                const own = Object.getOwnPropertyDescriptor(this, "stack");
-                if (own) {
-                    if (Object.prototype.hasOwnProperty.call(own, "value")) {
-                        return own.value;
-                    }
-                    if (typeof own.get === "function" && own.get !== getErrorStack) {
-                        return own.get.call(this);
-                    }
-                    return undefined;
-                }
-                return undefined;
-            },
-            set(value) {
-                Object.defineProperty(this, "stack", _dataDesc(value));
-                materializedErrorStacks.add(this);
-            },
-        });
-    } catch {
-        // Keep best-effort compatibility if the runtime forbids reconfiguration.
-    }
-}
+Object.defineProperty(globalThis, '__wasm_rquickjs_install_source_map_error_stack_shim', {
+    value() {
+        // The dispatcher reads the source-map registry dynamically, so enabling
+        // source maps later does not replace a public constructor or property.
+    },
+    writable: false,
+    configurable: false,
+});
 
 // ---------------------------------------------------------------------------
 // Global Error.captureStackTrace & Error.stackTraceLimit (V8 compat)
 // ---------------------------------------------------------------------------
-// QuickJS natively provides Error.captureStackTrace, Error.prepareStackTrace,
-// Error.stackTraceLimit, and native CallSite objects. However, the ErrorShim
-// above replaces globalThis.Error, which can interfere with the native
-// prepareStackTrace getter/setter chain when Error.captureStackTrace is called.
-//
-// We wrap the native captureStackTrace so that it checks the JS-level
-// Error.prepareStackTrace (which may be set on the ErrorShim) and, if set,
-// parses the raw stack string into our JS CallSite objects. This ensures
-// libraries like depd that set Error.prepareStackTrace and then call
-// Error.captureStackTrace get proper CallSite objects.
+// QuickJS invokes prepareStackTrace while captureStackTrace runs. Node defers
+// it until the first `.stack` read. Capture the native CallSites with an
+// internal hook, then select the public hook lazily and normalize incomplete
+// QuickJS CallSites to the V8-compatible shape expected by user code.
 {
-    const nativeCaptureStackTrace = globalThis.Error.captureStackTrace;
-    if (typeof nativeCaptureStackTrace === 'function') {
-        globalThis.Error.captureStackTrace = function captureStackTrace(targetObject, constructorOpt) {
-            // If prepareStackTrace is set at the JS level (e.g., on the ErrorShim),
-            // we need to handle it ourselves since the native captureStackTrace
-            // may not see it through the ErrorShim prototype chain.
-            const currentPrepare = globalThis.Error && globalThis.Error.prepareStackTrace;
-            if (typeof currentPrepare === 'function') {
-                // Temporarily clear prepareStackTrace so the native implementation
-                // produces a raw string stack (not CallSite objects).
-                globalThis.Error.prepareStackTrace = undefined;
-                try {
-                    nativeCaptureStackTrace(targetObject, constructorOpt);
-                } finally {
-                    globalThis.Error.prepareStackTrace = currentPrepare;
-                }
-
-                // Read the raw stack string, parse into CallSites, and install
-                // a lazy getter that calls prepareStackTrace on first access.
-                const rawStack = targetObject.stack;
-                if (typeof rawStack === 'string') {
-                    const callSites = _parseStackStringToCallSites(rawStack);
-                    Object.defineProperty(targetObject, "stack", {
-                        get() {
-                            const prepare = globalThis.Error && globalThis.Error.prepareStackTrace;
-                            const result = typeof prepare === "function"
-                                ? prepare(targetObject, callSites)
-                                : rawStack;
-                            Object.defineProperty(targetObject, "stack", _dataDesc(result));
-                            return result;
-                        },
-                        set(value) {
-                            Object.defineProperty(targetObject, "stack", _dataDesc(value));
-                        },
-                        configurable: true,
-                        enumerable: false,
-                    });
-                }
-            } else {
-                // No prepareStackTrace set — just use the native implementation as-is.
-                nativeCaptureStackTrace(targetObject, constructorOpt);
+    if (typeof nativeErrorCaptureStackTrace === 'function' &&
+        nativeErrorPrepareStackTraceDescriptor &&
+        typeof nativeErrorPrepareStackTraceDescriptor.set === 'function') {
+        function captureCallSites(targetObject, constructorOpt) {
+            nativeErrorPrepareStackTraceDescriptor.set.call(
+                NativeError,
+                _captureNativeCallSites,
+            );
+            try {
+                nativeErrorCaptureStackTrace(targetObject, constructorOpt);
+                return _takeNativeCallSites(targetObject) ?? [];
+            } finally {
+                nativeErrorPrepareStackTraceDescriptor.set.call(
+                    NativeError,
+                    _dispatchPrepareStackTrace,
+                );
             }
+        }
+
+        globalThis.Error.captureStackTrace = function captureStackTrace(targetObject, constructorOpt) {
+            const callSites = captureCallSites(targetObject, constructorOpt)
+                .map(_toCompatibleCallSite);
+            Object.defineProperty(targetObject, "stack", {
+                get() {
+                    const prepare = globalThis.Error && globalThis.Error.prepareStackTrace;
+                    const result = typeof prepare === "function"
+                        ? prepare(targetObject, callSites)
+                        : _prepareSourceMappedStack(targetObject, callSites);
+                    Object.defineProperty(targetObject, "stack", _dataDesc(result));
+                    return result;
+                },
+                set(value) {
+                    Object.defineProperty(targetObject, "stack", _dataDesc(value));
+                },
+                configurable: true,
+                enumerable: false,
+            });
         };
     }
 }
