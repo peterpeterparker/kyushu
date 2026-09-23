@@ -12,15 +12,13 @@ pub struct WorkerLinker {
 
 impl WorkerLinker {
     pub fn new() -> Result<Self> {
-        // The worker is a WASI Preview 3 component (async exports, streams and futures).
         let mut config = Config::new();
         config.wasm_component_model_async(true);
         let engine = Engine::new(&config)?;
 
         let mut linker: Linker<WorkerState> = Linker::new(&engine);
 
-        // Preview 2 remains required: Rust std on wasm32-wasip2 and parts of the runtime
-        // (e.g. the `utimes` family) still import the WASI 0.2 interfaces.
+        // Rust std on wasm32-wasip2 still imports WASI 0.2.
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi::p3::add_to_linker(&mut linker)?;
 

@@ -17,7 +17,6 @@ use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::bindings::Service;
 use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
 
-/// Body of the responses returned to hyper.
 pub type ResponseBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
 /// Binds a TCP listener on the given port and serves incoming HTTP/1.1 connections.
@@ -58,11 +57,7 @@ where
 }
 
 /// Dispatches an HTTP request to an already-initialized Wasm service instance.
-///
-/// The `wasi:http/handler#handle` export is called within the store's concurrent event loop.
-/// The response body is a stream produced by the guest, which only makes progress while that
-/// event loop runs. Therefore the loop is kept alive, in a spawned task, until hyper has
-/// consumed or dropped the body.
+/// The event loop is kept alive until hyper drops the body, since the guest streams it.
 pub async fn dispatch(
     service: Service,
     mut store: Store<WorkerState>,
@@ -110,7 +105,6 @@ pub async fn dispatch(
                     return;
                 }
 
-                // Resolves (with an error) once hyper drops the body.
                 let _ = done_rx.await;
             })
             .await;
@@ -126,8 +120,7 @@ pub async fn dispatch(
     }
 }
 
-/// Wraps a response body and drops `_done` together with it, notifying the
-/// dispatcher that the body is no longer read.
+/// Notifies the dispatcher when hyper drops the body.
 struct NotifyOnDrop {
     body: ResponseBody,
     _done: oneshot::Sender<()>,

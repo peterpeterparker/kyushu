@@ -7,6 +7,7 @@ mod bindings {
     });
 }
 mod handler;
+mod response;
 mod runtime;
 mod setup;
 mod types;

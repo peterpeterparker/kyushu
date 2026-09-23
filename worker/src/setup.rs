@@ -22,12 +22,5 @@ pub fn initialize() {
     kyushu_runtime::add_additional_module("@kyushu/app", Box::new(move || bundle.clone()));
 
     // Must be called after registering modules and before the first request is served.
-    //
-    // The polyfill's async runtime (QuickJS) is fully initialized at Wizer time so that the
-    // snapshot already contains the evaluated modules. The runtime state is snapshotted as
-    // WizerPreInitialized and the first request only refreshes the process state (env, argv).
-    //
-    // `wizer_initialize` is async on WASI Preview 3 but this export is synchronous, so it is
-    // driven to completion with the runtime's self-contained `block_on`.
     kyushu_runtime::internal::run_sync(kyushu_runtime::internal::wizer_initialize());
 }

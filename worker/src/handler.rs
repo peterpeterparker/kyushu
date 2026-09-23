@@ -1,8 +1,8 @@
-use crate::bindings::wasi::http::types::{ErrorCode, Fields, Method, Request, Response, Trailers};
-use crate::bindings::{wit_future, wit_stream};
+use crate::bindings::wasi::http::types::{ErrorCode, Method, Request, Response};
+use crate::bindings::wit_future;
+use crate::response::stream_response;
 use crate::types::{Body, HttpMethod, JsRequest, JsResponse};
 use rquickjs::{CatchResultExt, IntoJs, Module};
-use wit_bindgen::rt::async_support::spawn_local;
 
 pub async fn handle(request: Request) -> Result<Response, ErrorCode> {
     let js_request = extract_request(request).await;
@@ -17,48 +17,7 @@ pub async fn handle(request: Request) -> Result<Response, ErrorCode> {
         headers: vec![],
     });
 
-    let fields = Fields::new();
-    for (k, v) in &headers {
-        fields.append(k, v.as_bytes()).ok();
-    }
-
-    // A WASI 0.3 response takes a future which the host awaits after the body to know whether
-    // it completed successfully and if trailers (headers sent after the body) follow.
-    // We never send trailers. `trailers_tx` is dropped once the body is written, which
-    // resolves the future to the default `Ok(None)`: body complete, no trailers.
-    let (trailers_tx, trailers_rx) =
-        wit_future::new(|| Ok::<Option<Trailers>, ErrorCode>(None));
-
-    let (contents, body_tx) = match body {
-        Some(_) => {
-            let (body_tx, body_rx) = wit_stream::new::<u8>();
-            (Some(body_rx), Some(body_tx))
-        }
-        None => (None, None),
-    };
-
-    // The returned future resolves to the result of the response transmission. There is
-    // nothing to do with it, so it is dropped.
-    let (resp, _transmit) = Response::new(fields, contents, trailers_rx);
-    resp.set_status_code(status)
-        .map_err(|_| ErrorCode::InternalError(Some(format!("Invalid status code {status}"))))?;
-
-    // Streams are unbuffered: a write only completes once the host reads it, and the host only
-    // starts reading after `handle` returned the response. Writing the body inline would
-    // therefore deadlock, so it is written by a task that continues after the export returns.
-    match (body, body_tx) {
-        (Some(body), Some(mut body_tx)) => {
-            spawn_local(async move {
-                // Remaining bytes are only returned if the host dropped the reader.
-                let _remaining = body_tx.write_all(body.into_bytes()).await;
-                drop(body_tx);
-                drop(trailers_tx);
-            });
-        }
-        _ => drop(trailers_tx),
-    }
-
-    Ok(resp)
+    stream_response(status, headers, body)
 }
 
 fn method_to_string(method: Method) -> String {
@@ -96,8 +55,6 @@ async fn extract_request(request: Request) -> JsRequest {
         Some(headers)
     };
 
-    // `res` communicates a request processing error back to the host. We never report one:
-    // dropping the writer resolves it to its default value, `Ok(())`.
     let (res_tx, res_rx) = wit_future::new(|| Ok::<(), ErrorCode>(()));
     let (body_rx, _trailers) = Request::consume_body(request, res_rx);
     let bytes = body_rx.collect().await;
@@ -121,8 +78,6 @@ async fn extract_request(request: Request) -> JsRequest {
 }
 
 async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
-    // The runtime was pre-initialized by Wizer (or by kyu-initialize in dev mode). This
-    // refreshes the process state (env, argv) on the first request and returns the shared state.
     let js_state = kyushu_runtime::internal::ensure_initialized().await;
 
     let result = js_state
