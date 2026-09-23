@@ -11,4 +11,5 @@ rquickjs = { workspace = true }
 wasi = "0.14.7"
 wstd = { workspace = true }
 kyushu-runtime = { path = "../crates/runtime" }
+wit-bindgen = "0.41.0"
 wit-bindgen-rt = { version = "0.44.0", features = ["bitflags"] }
