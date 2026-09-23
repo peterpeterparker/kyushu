@@ -1,7 +1,7 @@
 use crate::bindings::wasi::http::types::{ErrorCode, Fields, Response, Trailers};
 use crate::bindings::{wit_future, wit_stream};
 use crate::types::Body;
-use wit_bindgen::rt::async_support::spawn_local;
+use wit_bindgen_p3::rt::async_support::spawn_local;
 
 pub fn stream_response(
     status: u16,

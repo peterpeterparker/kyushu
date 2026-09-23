@@ -9,4 +9,4 @@ crate-type = ["cdylib"]
 [dependencies]
 rquickjs = { workspace = true }
 kyushu-runtime = { path = "../crates/runtime", default-features = false, features = ["p3", "normal-p3"] }
-wit-bindgen = { version = "0.62.0", features = ["async", "async-spawn", "inter-task-wakeup"] }
+wit-bindgen-p3 = { workspace = true, features = ["realloc", "std", "bitflags"] }

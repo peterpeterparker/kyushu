@@ -1,8 +1,9 @@
 #[allow(warnings)]
 mod bindings {
-    wit_bindgen::generate!({
+    wit_bindgen_p3::generate!({
         path: "wit",
         world: "kyushu:worker/worker",
+        runtime_path: "wit_bindgen_p3::rt",
         generate_all,
     });
 }
