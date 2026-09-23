@@ -59,7 +59,6 @@ function getStats() {
 
 let _EventEmitter = null;
 let _PathModule = null;
-let _UrlModule = null;
 function getEventEmitter() {
     if (!_EventEmitter) {
         const events = require('node:events');
@@ -73,12 +72,6 @@ function getPathModule() {
         _PathModule = require('node:path');
     }
     return _PathModule;
-}
-function getUrlModule() {
-    if (!_UrlModule) {
-        _UrlModule = require('node:url');
-    }
-    return _UrlModule;
 }
 
 function wrapStat(statObj, options) {
@@ -225,7 +218,8 @@ function pathToString(path) {
     if (typeof path === 'string') return path;
     if (getBuffer() && path instanceof getBuffer()) return path.toString();
     if (path instanceof URL) {
-        return getUrlModule().fileURLToPath(path);
+        if (path.protocol !== 'file:') return path.toString();
+        return path.pathname;
     }
     return String(path);
 }
@@ -731,23 +725,22 @@ export async function appendFile(path, data, options) {
         return path.appendFile(data, options);
     }
 
-    const pathString = pathToString(path);
     const flush = options && typeof options === 'object' ? options.flush : undefined;
     validateFlush(flush);
     validateAppendFileData(data);
 
     let error;
     if (typeof data === 'string') {
-        error = native.fs_append_file_string(pathString, data);
+        error = native.fs_append_file_string(path, data);
     } else {
         const dataArray = new Uint8Array(data.buffer || data, data.byteOffset || 0, data.byteLength || data.length);
-        error = native.fs_append_file(pathString, dataArray);
+        error = native.fs_append_file(path, dataArray);
     }
     if (error) throw createSystemError(error);
 
     if (flush === true) {
         const fs = require('node:fs');
-        const fd = fs.openSync(pathString, 'r');
+        const fd = fs.openSync(path, 'r');
         try {
             fs.fsyncSync(fd);
         } finally {
@@ -757,12 +750,12 @@ export async function appendFile(path, data, options) {
 }
 
 export async function unlink(path) {
-    const error = native.unlink(pathToString(path));
+    const error = native.unlink(path);
     if (error) throw createSystemError(error);
 }
 
 export async function rename(oldPath, newPath) {
-    const error = native.rename(pathToString(oldPath), pathToString(newPath));
+    const error = native.rename(oldPath, newPath);
     if (error) throw createSystemError(error);
 }
 
@@ -777,21 +770,20 @@ export async function mkdir(path, options) {
 }
 
 export async function rmdir(path, options) {
-    const pathString = pathToString(path);
     if (options && options.recursive) {
-        const st = native.fs_stat(pathString);
+        const st = native.fs_stat(path);
         if (!st.error && !st.stat.isDirectory) {
-            const err = new Error(`ENOTDIR: not a directory, rmdir '${pathString}'`);
+            const err = new Error(`ENOTDIR: not a directory, rmdir '${path}'`);
             err.code = 'ENOTDIR';
             err.errno = -20;
             err.syscall = 'rmdir';
-            err.path = pathString;
+            err.path = path;
             throw err;
         }
-        const error = native.fs_rm(pathString, true, false);
+        const error = native.fs_rm(path, true, false);
         if (error) throw createSystemError(error);
     } else {
-        const error = native.fs_rmdir(pathString);
+        const error = native.fs_rmdir(path);
         if (error) throw createSystemError(error);
     }
 }
@@ -804,22 +796,21 @@ export async function rm(path, options) {
 }
 
 export async function stat(path, options) {
-    const result = native.fs_stat(pathToString(path));
+    const result = native.fs_stat(path);
     if (result.error) throw createSystemError(result.error);
     return wrapStat(result.stat, options);
 }
 
 export async function lstat(path, options) {
-    const result = native.fs_lstat(pathToString(path));
+    const result = native.fs_lstat(path);
     if (result.error) throw createSystemError(result.error);
     return wrapStat(result.stat, options);
 }
 
 export async function readdir(path, options) {
-    const pathString = pathToString(path);
     const withFileTypes = options && options.withFileTypes || false;
     const recursive = options && options.recursive || false;
-    const result = native.fs_readdir(pathString, withFileTypes);
+    const result = native.fs_readdir(path, withFileTypes);
     if (result.error) throw createSystemError(result.error);
     if (withFileTypes) {
         const sortedEntries = [...result.entries].sort((left, right) => {
@@ -846,13 +837,13 @@ export async function readdir(path, options) {
                     isSocket() { return this._fileType === 5; },
                 };
             };
-        const dirents = sortedEntries.map(e => makeDirent(e, pathString));
+        const dirents = sortedEntries.map(e => makeDirent(e, path));
         if (recursive) {
             const all = [];
             for (const dirent of dirents) {
                 all.push(dirent);
                 if (dirent.isDirectory()) {
-                    const subPath = pathString + '/' + dirent.name;
+                    const subPath = path + '/' + dirent.name;
                     try {
                         const subEntries = await readdir(subPath, { withFileTypes: true, recursive: true });
                         all.push(...subEntries);
@@ -872,10 +863,8 @@ export async function readdir(path, options) {
         const all = [];
         for (const entry of entries) {
             all.push(entry);
-            const subPath = pathString + '/' + entry;
+            const subPath = path + '/' + entry;
             try {
-                // Deliberately use stat: unlike withFileTypes mode, Node follows
-                // directory symlinks for recursive string results.
                 const st = native.fs_stat(subPath);
                 if (!st.error && st.stat.isDirectory) {
                     const subEntries = await readdir(subPath, { recursive: true });
@@ -904,12 +893,12 @@ export async function access(path, mode) {
         err.code = 'ERR_OUT_OF_RANGE';
         throw err;
     }
-    const error = native.fs_access(pathToString(path), mode);
+    const error = native.fs_access(path, mode);
     if (error) throw createSystemError(error);
 }
 
 export async function realpath(path, options) {
-    const result = native.fs_realpath(pathToString(path));
+    const result = native.fs_realpath(path);
     if (result.error) throw createSystemError(result.error);
     return result.result;
 }
@@ -926,28 +915,28 @@ export async function copyFile(src, dest, mode) {
         err.code = 'ERR_INVALID_ARG_TYPE';
         throw err;
     }
-    const error = native.fs_copy_file(pathToString(src), pathToString(dest));
+    const error = native.fs_copy_file(src, dest);
     if (error) throw createSystemError(error);
 }
 
 export async function link(existingPath, newPath) {
-    const error = native.fs_link(pathToString(existingPath), pathToString(newPath));
+    const error = native.fs_link(existingPath, newPath);
     if (error) throw createSystemError(error);
 }
 
 export async function symlink(target, path, type) {
-    const error = native.fs_symlink(pathToString(target), pathToString(path));
+    const error = native.fs_symlink(target, path);
     if (error) throw createSystemError(error);
 }
 
 export async function readlink(path, options) {
-    const result = native.fs_readlink(pathToString(path));
+    const result = native.fs_readlink(path);
     if (result.error) throw createSystemError(result.error);
     return result.result;
 }
 
 export async function chmod(path, mode) {
-    const error = native.fs_chmod(pathToString(path), mode);
+    const error = native.fs_chmod(path, mode);
     if (error) throw createSystemError(error);
 }
 
@@ -958,21 +947,21 @@ export async function lchmod(path, mode) {
 export async function chown(path, uid, gid) {
     validateUid(uid, 'uid');
     validateUid(gid, 'gid');
-    const error = native.fs_chown(pathToString(path), uid, gid);
+    const error = native.fs_chown(path, uid, gid);
     if (error) throw createSystemError(error);
 }
 
 export async function lchown(path, uid, gid) {
     validateUid(uid, 'uid');
     validateUid(gid, 'gid');
-    const error = native.fs_lchown(pathToString(path), uid, gid);
+    const error = native.fs_lchown(path, uid, gid);
     if (error) throw createSystemError(error);
 }
 
 export async function utimes(path, atime, mtime) {
     const atimeSecs = (atime instanceof Date) ? atime.getTime() / 1000 : Number(atime);
     const mtimeSecs = (mtime instanceof Date) ? mtime.getTime() / 1000 : Number(mtime);
-    const error = native.fs_utimes(pathToString(path), atimeSecs, mtimeSecs);
+    const error = native.fs_utimes(path, atimeSecs, mtimeSecs);
     if (error) throw createSystemError(error);
 }
 
@@ -992,8 +981,6 @@ export async function mkdtemp(prefix, options) {
 }
 
 export async function cp(src, dest, options) {
-    src = pathToString(src);
-    dest = pathToString(dest);
     // Simple copy implementation
     const srcResult = native.fs_stat(src);
     if (srcResult.error) throw createSystemError(srcResult.error);
@@ -1016,7 +1003,6 @@ export async function cp(src, dest, options) {
 
 export async function* watch(filename, options = {}) {
     validatePath(filename, 'filename');
-    filename = pathToString(filename);
 
     if (options === null || typeof options !== 'object' || Array.isArray(options)) {
         const err = new TypeError(`The "options" argument must be of type Object. Received ${describeType(options)}`);
@@ -1116,7 +1102,7 @@ export async function* watch(filename, options = {}) {
 }
 
 export async function statfs(path, options) {
-    const result = native.fs_stat(pathToString(path));
+    const result = native.fs_stat(path);
     if (result.error) throw createSystemError(result.error);
     const bigint = options && options.bigint;
     // Return a statfs-like object with sensible defaults

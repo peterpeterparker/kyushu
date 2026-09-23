@@ -1,19 +1,23 @@
+use futures::future::AbortHandle;
 use futures_concurrency::future::Join;
 use rquickjs::function::{Args, Constructor};
+use rquickjs::loader::{BuiltinLoader, BuiltinResolver, FileResolver};
 use rquickjs::{
     AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Error, Filter, FromJs, Function, Module,
     Object, Persistent, Promise, String as JsString, Value, async_with,
 };
 use rquickjs::{CaughtError, prelude::*};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::atomic::AtomicUsize;
 use wstd::runtime::block_on;
 
-use super::runtime_services::{
-    OwnedJsRuntime, RuntimeServices, initialize_builtin_wiring, initialize_dispose_symbols,
-    run_process_turn_checkpoint,
+use super::module_loading::{
+    CjsCompatLoader, CjsEvalResolver, DataUrlLoader, DataUrlResolver, FileUrlResolver,
+    ImportMetaInit, ImportMetaLoader, JsonFileLoader, MockModuleLoader, MockModuleResolver,
+    NodeFileResolver, NodeModuleErrorResolver, NodeModulesResolver, RealmGuardResolver,
+    inject_import_meta_prologue,
 };
 
 pub const RESOURCE_TABLE_NAME: &str = "__wasm_rquickjs_resources";
@@ -28,6 +32,9 @@ pub struct JsState {
     pub last_resource_id: AtomicUsize,
     pub resource_drop_queue_tx: futures::channel::mpsc::UnboundedSender<usize>,
     pub resource_drop_queue_rx: RefCell<Option<futures::channel::mpsc::UnboundedReceiver<usize>>>,
+    pub abort_handles: RefCell<HashMap<usize, AbortHandle>>,
+    pub last_abort_id: AtomicUsize,
+    pub unrefed_timers: RefCell<HashSet<usize>>,
     pub gc_pending: std::sync::atomic::AtomicBool,
 }
 
@@ -62,14 +69,106 @@ impl JsState {
     /// state. Does NOT evaluate any JavaScript — safe to publish to `STATE` before
     /// JS module initialization runs.
     async fn new_base() -> Self {
-        let OwnedJsRuntime { rt, ctx } = OwnedJsRuntime::new().await;
+        let rt = AsyncRuntime::new().expect("Failed to create AsyncRuntime");
+        // Raise the GC threshold to reduce the chance of triggering a QuickJS-ng
+        // shape refcount bug during heavy async/promise workloads. The default
+        // threshold (0xFF) causes GC to run too frequently, which can trigger
+        // a use-after-free in the shape reference counting code path.
+        rt.set_gc_threshold(256 * 1024 * 1024).await;
+        let ctx = AsyncContext::full(&rt)
+            .await
+            .expect("Failed to create AsyncContext");
+
+        let mut builtin_resolver =
+            BuiltinResolver::default().with_module(crate::JS_EXPORT_MODULE_NAME);
+        for (name, _) in crate::JS_ADDITIONAL_MODULES.iter() {
+            builtin_resolver = builtin_resolver.with_module(name.to_string());
+        }
+        let builtin_resolver = crate::modules::add_native_module_resolvers(builtin_resolver);
+        let builtin_resolver = crate::builtin::add_module_resolvers(builtin_resolver);
+
+        let file_resolver = FileResolver::default()
+            .with_path("/")
+            .with_pattern("{}.js")
+            .with_pattern("{}.mjs")
+            .with_pattern("{}.json");
+
+        let resolver = (
+            (
+                RealmGuardResolver,
+                MockModuleResolver,
+                DataUrlResolver,
+                FileUrlResolver,
+                builtin_resolver,
+                NodeModulesResolver,
+                NodeFileResolver,
+            ),
+            (CjsEvalResolver, file_resolver, NodeModuleErrorResolver),
+        );
+
+        let mut builtin_loader = BuiltinLoader::default().with_module(
+            crate::JS_EXPORT_MODULE_NAME,
+            inject_import_meta_prologue(
+                &ImportMetaInit {
+                    url: format!(
+                        "file:///__wasm_rquickjs_virtual__/{}.mjs",
+                        crate::JS_EXPORT_MODULE_NAME
+                    ),
+                    filename: None,
+                    dirname: None,
+                    include_resolve: true,
+                },
+                crate::js_export_module(),
+            ),
+        );
+        for (name, get_module) in crate::JS_ADDITIONAL_MODULES.iter() {
+            let source = (get_module)();
+            let injected = inject_import_meta_prologue(
+                &ImportMetaInit {
+                    url: format!("file:///__wasm_rquickjs_virtual__/{}.mjs", name),
+                    filename: None,
+                    dirname: None,
+                    include_resolve: true,
+                },
+                &source,
+            );
+            builtin_loader = builtin_loader.with_module(name.to_string(), injected);
+        }
+
+        let loader = (
+            MockModuleLoader,
+            builtin_loader,
+            crate::modules::module_loader(),
+            crate::builtin::module_loader(),
+            DataUrlLoader,
+            JsonFileLoader,
+            CjsCompatLoader,
+            ImportMetaLoader,
+        );
+
+        rt.set_loader(resolver, loader).await;
 
         async_with!(ctx => |ctx| {
             let global = ctx.globals();
 
             global.set(RESOURCE_TABLE_NAME, Object::new(ctx.clone()))
                 .expect("Failed to initialize resource table");
+
+            global.set("__wasm_rquickjs_mock_seq", 0i64)
+                .expect("Failed to initialize mock sequence counter");
         })
+        .await;
+
+        rt.set_host_promise_rejection_tracker(Some(Box::new(
+            |ctx, promise, reason, is_handled| {
+                if let Ok(handler) = ctx
+                    .globals()
+                    .get::<_, Function>("__wasm_rquickjs_rejection_tracker")
+                {
+                    let _ = handler.call::<_, Value>((promise, reason, is_handled));
+                }
+            },
+        )))
         .await;
 
         let (resource_drop_queue_tx, resource_drop_queue_rx) = futures::channel::mpsc::unbounded();
@@ -83,6 +182,9 @@ impl JsState {
             last_resource_id,
             resource_drop_queue_tx,
             resource_drop_queue_rx: RefCell::new(Some(resource_drop_queue_rx)),
+            abort_handles: RefCell::new(HashMap::new()),
+            last_abort_id: AtomicUsize::new(0),
+            unrefed_timers: RefCell::new(HashSet::new()),
             gc_pending: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -93,14 +195,46 @@ impl JsState {
         // Dispose symbols must be initialized before builtins, since builtin
         // modules use [Symbol.dispose] in their class definitions.
         // In latest version of rquickjs Symbol.dispose are supported
-        // initialize_dispose_symbols(&self.ctx)
-        //             .await
-        //             .unwrap_or_else(|error| panic!("{error}"));
+        // async_with!(self.ctx => |ctx| {
+        //     Module::evaluate(
+        //         ctx.clone(),
+        //         "dispose",
+        //         format!(r#"
+        //         const dispose = Symbol.for("dispose");
+        //         globalThis.{DISPOSE_SYMBOL} = dispose;
+        //         Symbol.dispose = dispose;
+        //         const asyncDispose = Symbol.for("asyncDispose");
+        //         Symbol.asyncDispose = asyncDispose;
+        //         "#)
+        //     ).catch(&ctx)
+        //     .unwrap_or_else(|e| panic!("Failed to evaluate dispose module initialization:\n{}", format_caught_error(e)))
+        //     .finish::<()>()
+        //     .catch(&ctx)
+        //     .unwrap_or_else(|e| panic!("Failed to finish dispose module initialization:\n{}", format_caught_error(e)));
+        // })
+        //     .await;
         // self.rt.idle().await;
 
-        initialize_builtin_wiring(&self.ctx)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
+        async_with!(self.ctx => |ctx| {
+            // Wire built-in globals (globalThis.require, Buffer, process, etc.)
+            // This must complete before user code runs, because bundled CJS-in-ESM code
+            // (e.g. esbuild's __require shim) checks `typeof require` at the top level
+            // during module evaluation. ES module semantics hoist all imports and evaluate
+            // them before the module body, so wiring and user import cannot share a single
+            // Module::evaluate call.
+            let wiring = crate::builtin::wire_builtins();
+            Module::evaluate(
+                ctx.clone(),
+                "__wasm_rquickjs_init_wiring",
+                wiring,
+            )
+            .catch(&ctx)
+            .unwrap_or_else(|e| panic!("Failed to evaluate built-in wiring:\n{}", format_caught_error(e)))
+            .finish::<()>()
+            .catch(&ctx)
+            .unwrap_or_else(|e| panic!("Failed to finish built-in wiring:\n{}", format_caught_error(e)));
+        })
+            .await;
         drain_and_idle(self).await;
     }
 
@@ -196,6 +330,18 @@ impl JsState {
     }
 }
 
+fn abort_unrefed_timers(js_state: &JsState) {
+    let unrefed = js_state.unrefed_timers.borrow().clone();
+    let mut abort_handles = js_state.abort_handles.borrow_mut();
+    let mut unrefed_mut = js_state.unrefed_timers.borrow_mut();
+    for id in unrefed.iter() {
+        if let Some(handle) = abort_handles.remove(id) {
+            handle.abort();
+        }
+        unrefed_mut.remove(id);
+    }
+}
+
 /// Runs GC if it was requested from JS (deferred to avoid re-entrancy issues).
 async fn run_pending_gc(js_state: &JsState) {
     if js_state
@@ -209,64 +355,36 @@ async fn run_pending_gc(js_state: &JsState) {
     }
 }
 
-async fn run_turn_checkpoint(js_state: &JsState) -> bool {
-    async_with!(js_state.ctx => |ctx| {
-        run_process_turn_checkpoint(&ctx).unwrap_or_else(|error| {
-            panic!("failed to run process turn checkpoint: {error}")
-        })
-    })
-    .await
-}
-
 /// Spawns a sentinel task that waits for all ref'd timers to complete,
 /// then aborts remaining unref'd timers so that `idle()` can return.
 async fn drain_and_idle(js_state: &JsState) {
     run_pending_gc(js_state).await;
-    let mut drove_runtime = false;
-    loop {
-        let checkpoint_did_work = run_turn_checkpoint(js_state).await;
-        if drove_runtime && !checkpoint_did_work {
-            return;
-        }
-        drove_runtime = true;
-
-        let has_unrefed_timers = async_with!(js_state.ctx => |ctx| {
-            !ctx.userdata::<RuntimeServices>()
-                .expect("runtime services not initialized")
-                .timers
-                .unrefed_timers
-                .borrow()
-                .is_empty()
-        })
-        .await;
-        if has_unrefed_timers {
-            // Spawn a sentinel that polls until only unref'd timers remain, then aborts them.
-            async_with!(js_state.ctx => |ctx| {
-                let task_ctx = ctx.clone();
-                ctx.spawn(async move {
-                    loop {
-                        wstd::task::sleep(wstd::time::Duration::from_millis(1)).await;
-                        let services = task_ctx
-                            .userdata::<RuntimeServices>()
-                            .expect("runtime services not initialized");
-                        let abort_count = services.timers.abort_handles.borrow().len();
-                        let unref_count = services.timers.unrefed_timers.borrow().len();
-                        // When the only remaining abort handles are for unref'd timers,
-                        // abort them all (the sentinel itself is not tracked in abort_handles).
-                        if abort_count > 0 && abort_count == unref_count {
-                            services.timers.abort_unrefed();
-                            break;
-                        }
-                        if unref_count == 0 {
-                            break;
-                        }
-                    }
-                });
-            })
-            .await;
-        }
+    if js_state.unrefed_timers.borrow().is_empty() {
         js_state.rt.idle().await;
+        return;
     }
+    // Spawn a sentinel that polls until only unref'd timers remain, then aborts them.
+    async_with!(js_state.ctx => |ctx| {
+        ctx.spawn(async {
+            loop {
+                wstd::task::sleep(wstd::time::Duration::from_millis(1)).await;
+                let state = get_js_state();
+                let abort_count = state.abort_handles.borrow().len();
+                let unref_count = state.unrefed_timers.borrow().len();
+                // When the only remaining abort handles are for unref'd timers,
+                // abort them all (the sentinel itself is not tracked in abort_handles).
+                if abort_count > 0 && abort_count == unref_count {
+                    abort_unrefed_timers(state);
+                    break;
+                }
+                if unref_count == 0 {
+                    break;
+                }
+            }
+        });
+    })
+    .await;
+    js_state.rt.idle().await;
 }
 
 static mut STATE: Option<JsState> = None;
@@ -1036,14 +1154,14 @@ pub fn wizer_initialize() {
             drain_and_idle(state).await;
 
             // Verify clean state
-            let timers_empty = async_with!(state.ctx => |ctx| {
-                ctx.userdata::<RuntimeServices>()
-                    .expect("runtime services not initialized")
-                    .timers
-                    .is_empty()
-            })
-            .await;
-            assert!(timers_empty, "pending timers/tasks at snapshot time");
+            assert!(
+                state.abort_handles.borrow().is_empty(),
+                "pending timers/tasks at snapshot time"
+            );
+            assert!(
+                state.unrefed_timers.borrow().is_empty(),
+                "unrefed timers still tracked at snapshot time"
+            );
         });
 
         INIT_PHASE = InitPhase::WizerPreInitialized;

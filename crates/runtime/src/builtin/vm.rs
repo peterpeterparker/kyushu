@@ -1,9 +1,6 @@
-use rquickjs::promise::PromiseState;
 use rquickjs::qjs;
-use rquickjs::{CaughtError, FromJs, Persistent, Promise, Value};
+use rquickjs::{CaughtError, Persistent, Value};
 use std::ptr::NonNull;
-
-use crate::internal::module_loading::path_to_file_url;
 
 #[rquickjs::module(rename = "camelCase")]
 pub mod native_module {
@@ -33,16 +30,6 @@ pub mod native_module {
         filename: String,
     ) -> rquickjs::Result<Value<'js>> {
         super::eval_with_filename_impl(ctx, &code, &filename)
-    }
-
-    #[rquickjs::function]
-    pub fn check_syntax_with_filename(
-        ctx: Ctx<'_>,
-        code: String,
-        filename: String,
-        is_module: bool,
-    ) -> rquickjs::Result<()> {
-        super::check_syntax_with_filename_impl(ctx, &code, &filename, is_module)
     }
 
     /// Load an ES module by filename and return its namespace object.
@@ -83,17 +70,6 @@ fn eval_in_new_context_impl<'js>(
 
     // Restore sandbox values into the new context's global object
     let new_global = new_ctx.globals();
-    // Match the Node 22 vm global surface by hiding QuickJS globals that are
-    // not present on a fresh contextified global unless the sandbox provides them.
-    for key in [
-        "DOMException",
-        "Float16Array",
-        "InternalError",
-        "performance",
-        "queueMicrotask",
-    ] {
-        let _ = new_global.remove(key);
-    }
     for (key, pval) in sandbox_keys.iter().zip(persistent_values) {
         let restored: Value<'js> = pval
             .restore(&new_ctx)
@@ -164,8 +140,10 @@ fn require_esm_impl<'js>(
     // the FileUrlResolver → ImportMetaLoader chain.
     let file_url = if filename.starts_with("file://") {
         filename.to_string()
+    } else if filename.starts_with('/') {
+        format!("file://{}", filename)
     } else {
-        path_to_file_url(filename)
+        format!("file:///{}", filename)
     };
 
     // Escape the URL for use inside a JS string literal
@@ -180,6 +158,7 @@ fn require_esm_impl<'js>(
         "import * as __ns from \"{}\"; globalThis.{} = __ns;\n",
         escaped_url, temp_key_str
     );
+
     let src = CString::new(code.as_str()).map_err(|_| rquickjs::Error::Unknown)?;
     let fname = CString::new(wrapper_name.as_str()).map_err(|_| rquickjs::Error::Unknown)?;
 
@@ -189,70 +168,57 @@ fn require_esm_impl<'js>(
         return throw_require_async_module(ctx, &globals, filename);
     }
 
-    enter_require_esm(&ctx, &globals, filename, &file_url)?;
-
-    let compiled_module = unsafe {
-        qjs::JS_Eval(
+    unsafe {
+        let val = qjs::JS_Eval(
             ctx.as_raw().as_ptr(),
             src.as_ptr(),
             code.len() as _,
             fname.as_ptr(),
-            (qjs::JS_EVAL_TYPE_MODULE | qjs::JS_EVAL_FLAG_COMPILE_ONLY) as i32,
-        )
-    };
-
-    if unsafe { qjs::JS_IsException(compiled_module) } {
-        leave_require_esm(&globals, filename, &file_url)?;
-        return Err(rquickjs::Error::Exception);
-    }
-
-    if cached_async_esm_module(&globals, filename, &file_url) {
-        unsafe {
-            qjs::JS_FreeValue(ctx.as_raw().as_ptr(), compiled_module);
+            qjs::JS_EVAL_TYPE_MODULE as i32,
+        );
+        if qjs::JS_IsException(val) {
+            return Err(rquickjs::Error::Exception);
         }
-        leave_require_esm(&globals, filename, &file_url)?;
-        return throw_require_async_module(ctx, &globals, filename);
-    }
 
-    let rejection_scope = begin_require_esm_rejection_scope(&ctx);
-    let eval_result = unsafe { qjs::JS_EvalFunction(ctx.as_raw().as_ptr(), compiled_module) };
-    if unsafe { qjs::JS_IsException(eval_result) } {
-        end_require_esm_rejection_scope(&ctx, rejection_scope);
-        leave_require_esm(&globals, filename, &file_url)?;
-        return Err(rquickjs::Error::Exception);
-    }
-
-    let eval_value = unsafe { Value::from_raw(ctx.clone(), eval_result) };
-    let pending_tla = if let Ok(promise) = Promise::from_js(&ctx, eval_value.clone()) {
-        match promise.state() {
-            PromiseState::Pending => {
-                ignore_unhandled_rejection(&ctx, eval_value);
-                end_require_esm_rejection_scope(&ctx, rejection_scope);
-                true
-            }
-            PromiseState::Rejected => {
-                ignore_unhandled_rejection(&ctx, eval_value.clone());
-                let _ = promise.result::<Value<'js>>();
-                let rejected = ctx.catch();
-                ignore_require_esm_rejection(&ctx, eval_value, rejected.clone(), rejection_scope);
-                leave_require_esm(&globals, filename, &file_url)?;
-                return Err(ctx.throw(rejected));
-            }
-            PromiseState::Resolved => {
-                end_require_esm_rejection_scope(&ctx, rejection_scope);
-                false
+        // If the module evaluation returned a Promise (TLA), attach a no-op
+        // .catch() handler so any rejection is marked as handled and doesn't
+        // trigger an unhandledRejection event. We'll report TLA as
+        // ERR_REQUIRE_ASYNC_MODULE below instead.
+        let tag = qjs::JS_VALUE_GET_TAG(val);
+        if tag == qjs::JS_TAG_OBJECT {
+            let catch_str = CString::new("catch").unwrap();
+            let catch_fn = qjs::JS_GetPropertyStr(ctx.as_raw().as_ptr(), val, catch_str.as_ptr());
+            if !qjs::JS_IsUndefined(catch_fn) && !qjs::JS_IsException(catch_fn) {
+                // Create a no-op function: function() {}
+                let noop_code = CString::new("(function(){})").unwrap();
+                let noop_fname = CString::new("<noop>").unwrap();
+                let noop_fn = qjs::JS_Eval(
+                    ctx.as_raw().as_ptr(),
+                    noop_code.as_ptr(),
+                    14,
+                    noop_fname.as_ptr(),
+                    qjs::JS_EVAL_TYPE_GLOBAL as i32,
+                );
+                if !qjs::JS_IsException(noop_fn) {
+                    // Call promise.catch(noop)
+                    let result = qjs::JS_Call(
+                        ctx.as_raw().as_ptr(),
+                        catch_fn,
+                        val,
+                        1,
+                        &noop_fn as *const _ as *mut _,
+                    );
+                    if !qjs::JS_IsException(result) {
+                        qjs::JS_FreeValue(ctx.as_raw().as_ptr(), result);
+                    }
+                    qjs::JS_FreeValue(ctx.as_raw().as_ptr(), noop_fn);
+                }
+                qjs::JS_FreeValue(ctx.as_raw().as_ptr(), catch_fn);
             }
         }
-    } else {
-        end_require_esm_rejection_scope(&ctx, rejection_scope);
-        false
-    };
 
-    leave_require_esm(&globals, filename, &file_url)?;
-
-    if pending_tla {
-        mark_async_esm_module(&ctx, &globals, filename, &file_url)?;
-        return throw_require_async_module(ctx, &globals, filename);
+        // Free the return value (Promise from module evaluation)
+        qjs::JS_FreeValue(ctx.as_raw().as_ptr(), val);
     }
 
     // Read the namespace from globalThis and clean up
@@ -270,90 +236,6 @@ fn require_esm_impl<'js>(
     } else {
         Ok(ns)
     }
-}
-
-fn ignore_unhandled_rejection<'js>(ctx: &rquickjs::Ctx<'js>, promise: Value<'js>) {
-    if let Ok(handler) = ctx
-        .globals()
-        .get::<_, rquickjs::Function>("__wasm_rquickjs_ignore_unhandled_rejection")
-    {
-        let _ = handler.call::<_, ()>((promise,));
-    }
-}
-
-fn begin_require_esm_rejection_scope(ctx: &rquickjs::Ctx<'_>) -> i64 {
-    ctx.globals()
-        .get::<_, rquickjs::Function>("__wasm_rquickjs_begin_require_esm_rejection_scope")
-        .and_then(|handler| handler.call::<_, i64>(()))
-        .unwrap_or(0)
-}
-
-fn end_require_esm_rejection_scope(ctx: &rquickjs::Ctx<'_>, scope: i64) {
-    if let Ok(handler) = ctx
-        .globals()
-        .get::<_, rquickjs::Function>("__wasm_rquickjs_end_require_esm_rejection_scope")
-    {
-        let _ = handler.call::<_, ()>((scope,));
-    }
-}
-
-fn ignore_require_esm_rejection<'js>(
-    ctx: &rquickjs::Ctx<'js>,
-    promise: Value<'js>,
-    reason: Value<'js>,
-    scope: i64,
-) {
-    if let Ok(handler) = ctx
-        .globals()
-        .get::<_, rquickjs::Function>("__wasm_rquickjs_ignore_require_esm_rejection")
-    {
-        let _ = handler.call::<_, ()>((promise, reason, scope));
-    }
-}
-
-fn enter_require_esm<'js>(
-    ctx: &rquickjs::Ctx<'js>,
-    globals: &rquickjs::Object<'js>,
-    filename: &str,
-    file_url: &str,
-) -> rquickjs::Result<()> {
-    let registry =
-        match globals.get::<_, rquickjs::Value>("__wasm_rquickjs_require_esm_in_progress") {
-            Ok(value) if value.is_object() => value.into_object().unwrap(),
-            _ => {
-                let object = rquickjs::Object::new(ctx.clone())?;
-                globals.set("__wasm_rquickjs_require_esm_in_progress", object.clone())?;
-                object
-            }
-        };
-
-    if registry.get::<_, bool>(filename).unwrap_or(false)
-        || registry.get::<_, bool>(file_url).unwrap_or(false)
-    {
-        let error_ctor: rquickjs::Function = globals.get("Error")?;
-        let msg = format!("Cannot require() ES Module {filename} in a cycle.");
-        let error_obj: rquickjs::Object = error_ctor.call((&msg,))?;
-        error_obj.set("code", "ERR_REQUIRE_CYCLE_MODULE")?;
-        return Err(ctx.throw(error_obj.into_value()));
-    }
-
-    registry.set(filename, true)?;
-    registry.set(file_url, true)?;
-    Ok(())
-}
-
-fn leave_require_esm<'js>(
-    globals: &rquickjs::Object<'js>,
-    filename: &str,
-    file_url: &str,
-) -> rquickjs::Result<()> {
-    if let Ok(registry) =
-        globals.get::<_, rquickjs::Object>("__wasm_rquickjs_require_esm_in_progress")
-    {
-        let _ = registry.remove(filename);
-        let _ = registry.remove(file_url);
-    }
-    Ok(())
 }
 
 fn cached_async_esm_module<'js>(
@@ -434,39 +316,6 @@ fn eval_with_filename_impl<'js>(
     let result: Value = globals.get("__wasm_rquickjs_eval_tmp")?;
     globals.remove("__wasm_rquickjs_eval_tmp")?;
     Ok(result)
-}
-
-fn check_syntax_with_filename_impl(
-    ctx: rquickjs::Ctx<'_>,
-    code: &str,
-    filename: &str,
-    is_module: bool,
-) -> rquickjs::Result<()> {
-    use std::ffi::CString;
-
-    let src = CString::new(code).map_err(|_| rquickjs::Error::Unknown)?;
-    let fname = CString::new(filename).map_err(|_| rquickjs::Error::Unknown)?;
-    let eval_type = if is_module {
-        qjs::JS_EVAL_TYPE_MODULE
-    } else {
-        qjs::JS_EVAL_TYPE_GLOBAL
-    };
-    let compiled = unsafe {
-        qjs::JS_Eval(
-            ctx.as_raw().as_ptr(),
-            src.as_ptr(),
-            code.len() as _,
-            fname.as_ptr(),
-            (eval_type | qjs::JS_EVAL_FLAG_COMPILE_ONLY) as i32,
-        )
-    };
-    if unsafe { qjs::JS_IsException(compiled) } {
-        return Err(rquickjs::Error::Exception);
-    }
-    unsafe {
-        qjs::JS_FreeValue(ctx.as_raw().as_ptr(), compiled);
-    }
-    Ok(())
 }
 
 /// Minimal JSON string quoting for error messages.

@@ -1,6 +1,5 @@
 // Minimal v8 module stub for Node.js compatibility
-// Most v8 internals are not available in QuickJS/WASM.
-import { heap_size_limit as heapSizeLimit } from '__wasm_rquickjs_builtin/v8_native';
+// Most v8 internals are not available in QuickJS/WASM
 
 export function getHeapStatistics() {
     return {
@@ -9,10 +8,7 @@ export function getHeapStatistics() {
         total_physical_size: 0,
         total_available_size: 0,
         used_heap_size: 0,
-        // QuickJS itself is left unlimited. The native bridge reports the
-        // component-wide wasm32 address-space ceiling required by consumers
-        // such as npm Arborist; it is not guaranteed memory for this runtime.
-        heap_size_limit: heapSizeLimit(),
+        heap_size_limit: 0,
         malloced_memory: 0,
         peak_malloced_memory: 0,
         does_zap_garbage: 0,

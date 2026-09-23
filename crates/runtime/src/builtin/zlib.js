@@ -513,7 +513,6 @@ class ZlibBase extends Transform {
     this._mode = mode;
     this._opts = opts || {};
     this._handle = null;
-    this._nativeHandle = null;
     this._isBrotli = false;
     this._closed = false;
     this._bytesWritten = 0;
@@ -543,42 +542,20 @@ class ZlibBase extends Transform {
     this.destroy();
   }
 
-  _closeNativeHandle() {
-    if (this._nativeHandle !== null) {
+  _closeHandle() {
+    if (this._handle !== null) {
       if (this._isBrotli) {
-        brotli_stream_close(this._nativeHandle);
+        brotli_stream_close(this._handle);
       } else {
-        zlib_stream_close(this._nativeHandle);
+        zlib_stream_close(this._handle);
       }
-      this._nativeHandle = null;
+      this._handle = null;
     }
   }
 
-  _closeHandle() {
-    this._closeNativeHandle();
-    this._handle = null;
-  }
-
-  _setNativeHandle(handle) {
-    assertHandle(handle);
-    this._nativeHandle = handle;
-    const owner = this;
-    // npm 10.9.2's bundled minizlib/node-tar reaches through
-    // `_handle._handle.close()` to release native state early. This private,
-    // version-scoped compatibility facade is not a general promise to expose
-    // Node's internal zlib handle API; `_nativeHandle` remains our sole owner.
-    this._handle = {
-      close() { owner._closeNativeHandle(); },
-      reset() { owner.reset(); },
-      _handle: {
-        close() { owner._closeNativeHandle(); },
-      },
-    };
-  }
-
   reset() {
-    if (this._nativeHandle !== null && !this._isBrotli) {
-      zlib_stream_reset(this._nativeHandle);
+    if (this._handle !== null && !this._isBrotli) {
+      zlib_stream_reset(this._handle);
       this._bytesWritten = 0;
     }
   }
@@ -633,8 +610,8 @@ class ZlibBase extends Transform {
     }
     if (this._level !== level || this._strategy !== strategy) {
       this.flush(Z_SYNC_FLUSH, () => {
-        if (this._nativeHandle !== null) {
-          zlib_stream_params(this._nativeHandle, level, strategy);
+        if (this._handle !== null) {
+          zlib_stream_params(this._handle, level, strategy);
         }
         this._level = level;
         this._strategy = strategy;
@@ -646,21 +623,21 @@ class ZlibBase extends Transform {
   }
 
   _processChunk(chunk, flushFlag) {
-    if (this._nativeHandle === null) this._initHandle();
+    if (this._handle === null) this._initHandle();
     const buf = toBuffer(chunk);
     const data = toUint8Array(buf);
     this._bytesWritten += data.length;
     if (this._isBrotli) {
       if (data.length > 0) {
-        brotli_stream_push(this._nativeHandle, data, 0);
+        brotli_stream_push(this._handle, data, 0);
       }
       if (flushFlag === BROTLI_OPERATION_FINISH || flushFlag === Z_FINISH) {
-        const result = brotli_stream_push(this._nativeHandle, new Uint8Array(0), 2);
+        const result = brotli_stream_push(this._handle, new Uint8Array(0), 2);
         return result ? Buffer.from(result) : Buffer.alloc(0);
       }
       return Buffer.alloc(0);
     } else {
-      const result = zlib_stream_push(this._nativeHandle, data, flushFlag);
+      const result = zlib_stream_push(this._handle, data, flushFlag);
       return result ? Buffer.from(result) : Buffer.alloc(0);
     }
   }
@@ -670,7 +647,7 @@ class ZlibBase extends Transform {
   }
 
   _transform(chunk, encoding, callback) {
-   if (this._nativeHandle === null) this._initHandle();
+   if (this._handle === null) this._initHandle();
 
    // Validate input type - throw synchronously so write() throws (matches Node.js behavior)
    if (typeof chunk !== 'string' && !Buffer.isBuffer(chunk) && !ArrayBuffer.isView(chunk) && !(chunk instanceof ArrayBuffer)) {
@@ -695,9 +672,9 @@ class ZlibBase extends Transform {
        }
      }
      if (this._isBrotli) {
-       result = brotli_stream_push(this._nativeHandle, data, flush);
+       result = brotli_stream_push(this._handle, data, flush);
      } else {
-       result = zlib_stream_push(this._nativeHandle, data, flush || Z_NO_FLUSH);
+       result = zlib_stream_push(this._handle, data, flush || Z_NO_FLUSH);
      }
      if (result == null) {
        this._closeHandle();
@@ -714,7 +691,7 @@ class ZlibBase extends Transform {
   }
 
   _flush(callback) {
-    if (this._nativeHandle === null) {
+    if (this._handle === null) {
       callback();
       return;
     }
@@ -722,9 +699,9 @@ class ZlibBase extends Transform {
     try {
       let result;
       if (this._isBrotli) {
-        result = brotli_stream_push(this._nativeHandle, new Uint8Array(0), 2);
+        result = brotli_stream_push(this._handle, new Uint8Array(0), 2);
       } else {
-        result = zlib_stream_push(this._nativeHandle, new Uint8Array(0), this._finishFlush);
+        result = zlib_stream_push(this._handle, new Uint8Array(0), this._finishFlush);
       }
       if (result == null) {
         this._closeHandle();
@@ -771,10 +748,10 @@ class _Deflate extends ZlibBase {
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : Z_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : Z_NO_FLUSH;
     this._dictionary = validated.dictionary;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(zlib_stream_new(0, this._level, this._windowBits, this._memLevel, this._strategy));
+    this._handle = zlib_stream_new(0, this._level, this._windowBits, this._memLevel, this._strategy);
+    assertHandle(this._handle);
   }
 }
 
@@ -786,10 +763,10 @@ class _Inflate extends ZlibBase {
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : Z_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : Z_NO_FLUSH;
     this._dictionary = validated.dictionary;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(zlib_stream_new(1, 0, this._windowBits, 0, 0));
+    this._handle = zlib_stream_new(1, 0, this._windowBits, 0, 0);
+    assertHandle(this._handle);
   }
 }
 
@@ -803,10 +780,10 @@ class _Gzip extends ZlibBase {
     this._strategy = validated.strategy;
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : Z_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : Z_NO_FLUSH;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(zlib_stream_new(2, this._level, this._windowBits, this._memLevel, this._strategy));
+    this._handle = zlib_stream_new(2, this._level, this._windowBits, this._memLevel, this._strategy);
+    assertHandle(this._handle);
   }
 }
 
@@ -816,10 +793,10 @@ class _Gunzip extends ZlibBase {
     super(opts, GUNZIP);
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : Z_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : Z_NO_FLUSH;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(zlib_stream_new(3, 0, 15, 0, 0));
+    this._handle = zlib_stream_new(3, 0, 15, 0, 0);
+    assertHandle(this._handle);
   }
 }
 
@@ -834,10 +811,10 @@ class _DeflateRaw extends ZlibBase {
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : Z_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : Z_NO_FLUSH;
     this._dictionary = validated.dictionary;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(zlib_stream_new(4, this._level, this._windowBits, this._memLevel, this._strategy));
+    this._handle = zlib_stream_new(4, this._level, this._windowBits, this._memLevel, this._strategy);
+    assertHandle(this._handle);
   }
 }
 
@@ -848,10 +825,10 @@ class _InflateRaw extends ZlibBase {
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : Z_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : Z_NO_FLUSH;
     this._dictionary = validated.dictionary;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(zlib_stream_new(5, 0, 15, 0, 0));
+    this._handle = zlib_stream_new(5, 0, 15, 0, 0);
+    assertHandle(this._handle);
   }
 }
 
@@ -861,10 +838,10 @@ class _Unzip extends ZlibBase {
     super(opts, UNZIP);
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : Z_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : Z_NO_FLUSH;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(zlib_stream_new(6, 0, 15, 0, 0));
+    this._handle = zlib_stream_new(6, 0, 15, 0, 0);
+    assertHandle(this._handle);
   }
 }
 
@@ -880,12 +857,12 @@ class _BrotliCompress extends ZlibBase {
     if (!validateBrotliParams(this._brotliParams)) {
       throw makeError('ERR_ZLIB_INITIALIZATION_FAILED', 'Initialization failed');
     }
-    this._initHandle();
   }
   _initHandle() {
-    if (this._nativeHandle !== null) return;
+    if (this._handle !== null) return;
     const paramsJson = brotliParamsToJson(this._brotliParams);
-    this._setNativeHandle(brotli_stream_new(0, paramsJson));
+    this._handle = brotli_stream_new(0, paramsJson);
+    assertHandle(this._handle);
   }
 }
 
@@ -897,18 +874,18 @@ class _BrotliDecompress extends ZlibBase {
     this._finishFlush = validated.finishFlush !== undefined ? validated.finishFlush : BROTLI_OPERATION_FINISH;
     this._flushFlag = validated.flush !== undefined ? validated.flush : BROTLI_OPERATION_PROCESS;
     this._brotliFlushCb = null;
-    this._initHandle();
   }
   _initHandle() {
-    this._setNativeHandle(brotli_stream_new(1, '{}'));
+    this._handle = brotli_stream_new(1, '{}');
+    assertHandle(this._handle);
   }
   _flush(callback) {
-    if (this._nativeHandle === null) {
+    if (this._handle === null) {
       callback();
       return;
     }
     try {
-      const result = brotli_stream_push(this._nativeHandle, new Uint8Array(0), 2);
+      const result = brotli_stream_push(this._handle, new Uint8Array(0), 2);
       if (result == null) {
         this._closeHandle();
         callback(makeError('ERR_ZLIB_INITIALIZATION_FAILED', 'zlib error'));
@@ -929,8 +906,8 @@ class _BrotliDecompress extends ZlibBase {
   }
   _drainBrotliStream(callback) {
     try {
-      while (this._nativeHandle !== null) {
-        const chunk = brotli_stream_pull(this._nativeHandle, Z_DEFAULT_CHUNK);
+      while (this._handle !== null) {
+        const chunk = brotli_stream_pull(this._handle, Z_DEFAULT_CHUNK);
         if (!chunk || chunk.length === 0) {
           this._closeHandle();
           callback();

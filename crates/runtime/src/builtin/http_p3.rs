@@ -14,9 +14,9 @@
 //! bodies (string / `ArrayBuffer` / `Uint8Array` / `URLSearchParams` / `Blob` / `FormData`,
 //! the latter two are converted to `ArrayBuffer` by `http.js` before reaching native code),
 //! redirect following/error/manual policies, credentials filtering, referrer policy, and
-//! response consumption via `text()`, `arrayBuffer()`, and `body`/`stream()`. Response heads are
-//! returned immediately and native response bodies are consumed lazily, with buffering only when
-//! clones need independent views of the same underlying stream.
+//! response consumption via `text()`, `arrayBuffer()`, and `body`/`stream()`. Response bodies
+//! are read to completion eagerly after the response head arrives, so streaming is served from
+//! the buffered bytes.
 //!
 //! Streaming *request* bodies (a `ReadableStream` passed as the fetch body) are also supported.
 //! `http.js` drives them through the split native contract (`initSend` / `initRequestBody` /
@@ -31,16 +31,9 @@ use http::{HeaderName, HeaderValue, StatusCode, Version};
 use rquickjs::convert::Coerced;
 use rquickjs::prelude::List;
 use rquickjs::{ArrayBuffer, Ctx, Exception, FromJs, IntoJs, JsLifetime, TypedArray, Value};
-
-use super::abort_signal::with_abort_signal;
-use super::http_body::ResponseBody as NativeResponseBody;
-use super::shared_response_body::{self, NativeBody, SharedBodyCompletion, SharedBodyReader};
-use futures::future::{AbortHandle, Abortable};
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 use url::Url;
 use wasip3::http::types::{ErrorCode, Fields, Method, Request, Response, Scheme, Trailers};
 use wasip3::wit_bindgen::{FutureWriter, StreamWriter};
@@ -54,38 +47,10 @@ type SendFuture = Pin<Box<dyn Future<Output = Result<Response, ErrorCode>>>>;
 type TrailersWriter = FutureWriter<Result<Option<Trailers>, ErrorCode>>;
 
 /// Native module exposed to JavaScript as `__wasm_rquickjs_builtin/http_native`.
-#[cfg(not(feature = "internal-test-execution"))]
 #[rquickjs::module]
 pub mod native_module {
     pub use super::HttpRequest;
     pub use super::HttpResponse;
-}
-
-/// Test-instrumented variant of the native HTTP module. Keeping the hooks as module functions
-/// avoids adding test-only methods to the production `HttpResponse` JavaScript prototype.
-#[cfg(feature = "internal-test-execution")]
-#[rquickjs::module]
-pub mod native_module {
-    pub use super::HttpRequest;
-    pub use super::HttpResponse;
-
-    #[qjs(rename = "takeRecoveredBodyReadBytesForTest")]
-    #[rquickjs::function]
-    pub fn take_recovered_body_read_bytes_for_test<'js>(
-        response: rquickjs::Class<'js, super::HttpResponse>,
-    ) -> usize {
-        response.borrow().take_recovered_body_read_bytes_for_test()
-    }
-
-    #[qjs(rename = "pauseNextBodyReadAfterReadyForTest")]
-    #[rquickjs::function]
-    pub fn pause_next_body_read_after_ready_for_test<'js>(
-        response: rquickjs::Class<'js, super::HttpResponse>,
-    ) -> bool {
-        response
-            .borrow()
-            .pause_next_body_read_after_ready_for_test()
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -510,19 +475,7 @@ impl HttpRequest {
     /// reading so a large / slow / never-ending discarded body cannot stall the redirect loop. Only
     /// the final visible response body is read; a body that failed mid-transfer is recorded and
     /// surfaced when JS actually consumes it.
-    pub async fn receive_response<'js>(
-        &mut self,
-        ctx: Ctx<'js>,
-        signal: Option<Value<'js>>,
-    ) -> rquickjs::Result<HttpResponse> {
-        let receive = self.receive_response_inner(ctx.clone());
-        with_abort_signal(&ctx, signal, receive).await
-    }
-
-    async fn receive_response_inner<'js>(
-        &mut self,
-        ctx: Ctx<'js>,
-    ) -> rquickjs::Result<HttpResponse> {
+    pub async fn receive_response<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<HttpResponse> {
         let Some(send_future) = self.send_future.take() else {
             return Err(Exception::throw_message(
                 &ctx,
@@ -577,24 +530,22 @@ impl HttpRequest {
             return Ok(opaque);
         }
 
-        // Preserve the native body owner so fetch resolves after the response head. Transfer
-        // errors are surfaced when JS consumes the body, matching the Preview 2 lifecycle.
-        Ok(HttpResponse::from_response(status, resp_headers, response))
+        // Final visible response: read the body fully. A body that failed mid-transfer must reject
+        // the fetch immediately (matching the buffered `simple_send` path) instead of surfacing
+        // partial bytes or deferring the error to `text()`/`arrayBuffer()`. Because discarded
+        // redirect / opaque bodies were already dropped above, reaching here means the body is
+        // genuinely visible to JS, so it is safe to fail `fetch()` eagerly.
+        let (body, body_error) = consume_response_body(response).await;
+        if let Some(err) = body_error {
+            return Err(Exception::throw_message(&ctx, &err));
+        }
+        Ok(HttpResponse::from_parts(status, resp_headers, body))
     }
 
     /// Buffered send with redirect handling. Only the final visible response body is read; the
     /// bodies of followed redirects, rejected redirects, and opaque responses are discarded without
     /// reading, so a large or never-ending discarded body cannot stall the fetch.
-    pub async fn simple_send<'js>(
-        &mut self,
-        ctx: Ctx<'js>,
-        signal: Option<Value<'js>>,
-    ) -> rquickjs::Result<HttpResponse> {
-        let send = self.simple_send_inner(ctx.clone());
-        with_abort_signal(&ctx, signal, send).await
-    }
-
-    async fn simple_send_inner<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<HttpResponse> {
+    pub async fn simple_send<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<HttpResponse> {
         // Validate mode constraints (mirrors the Preview 2 path). The streaming request-body path
         // performs the same validation in `init_send`.
         self.validate_request_mode(&ctx)?;
@@ -708,9 +659,13 @@ impl HttpRequest {
                 return Ok(opaque);
             }
 
-            // Keep the final response body native and lazy so fetch resolves as soon as the head
-            // arrives. Body transfer failures remain observable at consumption time.
-            let mut response = HttpResponse::from_response(status, resp_headers, response);
+            // Non-opaque final response: read the body fully. A body that failed mid-transfer must
+            // reject the fetch instead of surfacing partial bytes.
+            let (body, body_error) = consume_response_body(response).await;
+            if let Some(err) = body_error {
+                return Err(Exception::throw_message(&ctx, &err));
+            }
+            let mut response = HttpResponse::from_parts(status, resp_headers, body);
             response.redirected = current_redirects > 0;
             return Ok(response);
         }
@@ -746,9 +701,9 @@ impl HttpRequest {
 }
 
 /// Performs a single (non-redirecting) request through `wasi:http/client` and returns the response
-/// head. The response body is **not** consumed here: the caller retains it for a final visible
-/// response, or drops it to discard a followed redirect / opaque response without paying for a
-/// large or never-ending body.
+/// head. The response body is **not** consumed here: the caller reads it with
+/// [`consume_response_body`] for a final visible response, or drops the response to discard the
+/// body of a followed redirect / opaque response without paying for a large or never-ending body.
 async fn send_once(
     ctx: &Ctx<'_>,
     url: &Url,
@@ -811,6 +766,33 @@ async fn send_once(
         .map_err(|e| Exception::throw_message(ctx, &format!("HTTP request failed: {e:?}")))?;
 
     Ok(response)
+}
+
+/// Reads a `wasi:http` response body fully into memory.
+///
+/// Returns `(body, body_error)`. `body_error` is `Some(message)` when the response body failed
+/// mid-transfer (e.g. a truncated response); the caller decides whether to surface it. Only call
+/// this for responses whose body is actually visible to JS — a discarded redirect / opaque body
+/// should be dropped without reading instead, so a large or never-ending body cannot stall fetch.
+async fn consume_response_body(response: Response) -> (Vec<u8>, Option<String>) {
+    // Consume the response body stream fully. The `res` future communicates a handling error to
+    // the transport; we always signal success by letting its writer resolve to `Ok(())`.
+    let (res_tx, res_rx) = wasip3::wit_future::new(|| Ok::<(), ErrorCode>(()));
+    let (body_reader, body_result) = Response::consume_body(response, res_rx);
+    drop(res_tx);
+    let body = body_reader.collect().await;
+
+    // The returned future only resolves after the body stream is closed (which the `collect`
+    // above guarantees). Await it to detect a body that failed mid-transfer — e.g. a truncated
+    // response. It resolves to `Ok(Option<Trailers>)` on success (trailers are not surfaced to
+    // the JS `fetch` API) or `Err(ErrorCode)` when the transport reports the body was not
+    // received successfully.
+    let body_error = match body_result.await {
+        Ok(_) => None,
+        Err(e) => Some(format!("HTTP response body error: {e:?}")),
+    };
+
+    (body, body_error)
 }
 
 // ---------------------------------------------------------------------------
@@ -887,11 +869,6 @@ impl WrappedRequestBodyWriter {
         self.trailers_tx = None;
         Ok(())
     }
-
-    pub fn abort_body(&mut self) {
-        self.body_tx = None;
-        self.trailers_tx = None;
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -900,31 +877,7 @@ impl WrappedRequestBodyWriter {
 
 enum ResponseBody {
     Bytes(Vec<u8>),
-    Native(NativeResponseBody),
-    Shared(SharedResponseBody),
     Consumed,
-}
-
-type SharedResponseBody = SharedBodyReader<NativeResponseBody>;
-
-impl NativeBody for NativeResponseBody {
-    async fn read_chunk(&mut self) -> Result<Option<Vec<u8>>, String> {
-        NativeResponseBody::read_chunk(self).await
-    }
-
-    fn discard(mut self) {
-        NativeResponseBody::discard(&mut self);
-    }
-
-    #[cfg(feature = "internal-test-execution")]
-    fn take_recovered_read_bytes_for_test(&self) -> usize {
-        NativeResponseBody::take_recovered_read_bytes_for_test(self)
-    }
-
-    #[cfg(feature = "internal-test-execution")]
-    fn pause_next_ready_read_for_test(&self) -> bool {
-        NativeResponseBody::pause_next_ready_read_for_test(self)
-    }
 }
 
 #[derive(rquickjs::class::Trace, JsLifetime)]
@@ -932,6 +885,11 @@ impl NativeBody for NativeResponseBody {
 pub struct HttpResponse {
     #[qjs(skip_trace)]
     body: ResponseBody,
+    /// A response body that failed mid-transfer (e.g. a truncated response). It is deferred until
+    /// the body is consumed so that a discarded response (e.g. an intermediate redirect body) does
+    /// not surface a spurious error, matching the buffered path's redirect handling.
+    #[qjs(skip_trace)]
+    body_error: Option<String>,
     headers: Vec<Vec<String>>,
     status: u16,
     is_opaque: bool,
@@ -955,6 +913,7 @@ impl HttpResponse {
     pub fn new() -> Self {
         Self {
             body: ResponseBody::Consumed,
+            body_error: None,
             headers: Vec::new(),
             status: 200,
             is_opaque: false,
@@ -965,20 +924,19 @@ impl HttpResponse {
 
     #[qjs(skip)]
     pub fn from_parts(status: u16, headers: Vec<Vec<String>>, body: Vec<u8>) -> Self {
-        Self {
-            body: ResponseBody::Bytes(body),
-            headers,
-            status,
-            is_opaque: false,
-            is_opaque_redirect: false,
-            redirected: false,
-        }
+        Self::from_parts_with_error(status, headers, body, None)
     }
 
     #[qjs(skip)]
-    fn from_response(status: u16, headers: Vec<Vec<String>>, response: Response) -> Self {
+    pub fn from_parts_with_error(
+        status: u16,
+        headers: Vec<Vec<String>>,
+        body: Vec<u8>,
+        body_error: Option<String>,
+    ) -> Self {
         Self {
-            body: ResponseBody::Native(NativeResponseBody::new(response)),
+            body: ResponseBody::Bytes(body),
+            body_error,
             headers,
             status,
             is_opaque: false,
@@ -994,22 +952,7 @@ impl HttpResponse {
         self.status = 200; // reported as 0 while opaque
         // Opaque responses never surface their body to JS, so a deferred body-transfer error is
         // not observable and must not fail the fetch.
-    }
-
-    pub fn discard_body(&mut self) {
-        match std::mem::replace(&mut self.body, ResponseBody::Consumed) {
-            ResponseBody::Native(native) => native.discard(),
-            ResponseBody::Shared(shared) => shared.discard(),
-            ResponseBody::Bytes(_) | ResponseBody::Consumed => {}
-        }
-    }
-
-    pub async fn discard_body_and_wait(&mut self) {
-        match std::mem::replace(&mut self.body, ResponseBody::Consumed) {
-            ResponseBody::Native(native) => native.discard(),
-            ResponseBody::Shared(shared) => shared.discard_and_wait().await,
-            ResponseBody::Bytes(_) | ResponseBody::Consumed => {}
-        }
+        self.body_error = None;
     }
 
     /// Turns this response into a `redirect: "manual"` opaque-redirect filtered response. Like
@@ -1070,12 +1013,8 @@ impl HttpResponse {
             .to_string()
     }
 
-    pub async fn array_buffer<'js>(
-        &mut self,
-        ctx: Ctx<'js>,
-        signal: Option<Value<'js>>,
-    ) -> rquickjs::Result<ArrayBuffer<'js>> {
-        let bytes = self.take_body(&ctx, signal).await?;
+    pub async fn array_buffer<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<ArrayBuffer<'js>> {
+        let bytes = self.take_body(&ctx)?;
         let ctx_clone = ctx.clone();
         ArrayBuffer::new(ctx, bytes).map_err(move |_| {
             Exception::throw_message(
@@ -1085,37 +1024,24 @@ impl HttpResponse {
         })
     }
 
-    pub async fn text<'js>(
-        &mut self,
-        ctx: Ctx<'js>,
-        signal: Option<Value<'js>>,
-    ) -> rquickjs::Result<String> {
-        let bytes = self.take_body(&ctx, signal).await?;
+    pub async fn text<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<String> {
+        let bytes = self.take_body(&ctx)?;
         Ok(String::from_utf8_lossy(&bytes).to_string())
     }
 
     pub fn stream<'js>(&mut self, ctx: Ctx<'js>) -> rquickjs::Result<ResponseBodyStream> {
-        match std::mem::replace(&mut self.body, ResponseBody::Consumed) {
-            ResponseBody::Bytes(bytes) => Ok(ResponseBodyStream::from_source(
-                ResponseBodyStreamSource::Bytes(bytes),
-            )),
-            ResponseBody::Native(native) => Ok(ResponseBodyStream::from_source(
-                ResponseBodyStreamSource::Native(native),
-            )),
-            ResponseBody::Shared(shared) => Ok(ResponseBodyStream::from_source(
-                ResponseBodyStreamSource::Shared(shared),
-            )),
-            ResponseBody::Consumed => Err(Exception::throw_message(
-                &ctx,
-                "The response has already been consumed",
-            )),
-        }
+        let bytes = self.take_body(&ctx)?;
+        Ok(ResponseBodyStream {
+            bytes: Some(bytes),
+            position: 0,
+        })
     }
 
     #[qjs(static)]
     pub fn error() -> Self {
         Self {
             body: ResponseBody::Consumed,
+            body_error: None,
             headers: Vec::new(),
             status: 500,
             is_opaque: false,
@@ -1133,6 +1059,7 @@ impl HttpResponse {
             .unwrap_or(302);
         Self {
             body: ResponseBody::Consumed,
+            body_error: None,
             headers: vec![vec!["location".to_string(), url.0]],
             status: status_code,
             is_opaque: false,
@@ -1149,6 +1076,7 @@ impl HttpResponse {
             .unwrap_or(200);
         Self {
             body: ResponseBody::Bytes(data.as_bytes().map(|b| b.to_vec()).unwrap_or_default()),
+            body_error: None,
             headers: vec![vec![
                 "content-type".to_string(),
                 "application/json".to_string(),
@@ -1166,19 +1094,12 @@ impl HttpResponse {
                 ResponseBody::Bytes(bytes.clone()),
                 ResponseBody::Bytes(bytes),
             ),
-            ResponseBody::Native(native) => {
-                let (kept, cloned) = SharedResponseBody::pair(native);
-                (ResponseBody::Shared(kept), ResponseBody::Shared(cloned))
-            }
-            ResponseBody::Shared(shared) => (
-                ResponseBody::Shared(shared.branch()),
-                ResponseBody::Shared(shared),
-            ),
             ResponseBody::Consumed => (ResponseBody::Consumed, ResponseBody::Consumed),
         };
         self.body = kept;
         Self {
             body: cloned,
+            body_error: self.body_error.clone(),
             headers: self.headers.clone(),
             status: self.status,
             is_opaque: self.is_opaque,
@@ -1189,46 +1110,16 @@ impl HttpResponse {
 }
 
 impl HttpResponse {
-    #[cfg(feature = "internal-test-execution")]
-    fn take_recovered_body_read_bytes_for_test(&self) -> usize {
-        match &self.body {
-            ResponseBody::Native(native) => native.take_recovered_read_bytes_for_test(),
-            ResponseBody::Shared(shared) => shared.take_recovered_read_bytes_for_test(),
-            ResponseBody::Bytes(_) | ResponseBody::Consumed => 0,
-        }
-    }
-
-    #[cfg(feature = "internal-test-execution")]
-    fn pause_next_body_read_after_ready_for_test(&self) -> bool {
-        match &self.body {
-            ResponseBody::Native(native) => native.pause_next_ready_read_for_test(),
-            ResponseBody::Shared(shared) => shared.pause_next_ready_read_for_test(),
-            ResponseBody::Bytes(_) | ResponseBody::Consumed => false,
-        }
-    }
-
-    async fn take_body<'js>(
-        &mut self,
-        ctx: &Ctx<'js>,
-        signal: Option<Value<'js>>,
-    ) -> rquickjs::Result<Vec<u8>> {
+    fn take_body(&mut self, ctx: &Ctx<'_>) -> rquickjs::Result<Vec<u8>> {
         match std::mem::replace(&mut self.body, ResponseBody::Consumed) {
-            ResponseBody::Bytes(bytes) => Ok(bytes),
-            ResponseBody::Native(mut native) => {
-                let read = async move {
-                    let mut bytes = Vec::new();
-                    while let Some(chunk) = native
-                        .read_chunk()
-                        .await
-                        .map_err(|error| Exception::throw_message(ctx, &error))?
-                    {
-                        bytes.extend_from_slice(&chunk);
-                    }
-                    Ok(bytes)
-                };
-                with_abort_signal(ctx, signal, read).await
+            ResponseBody::Bytes(bytes) => {
+                // A body that failed mid-transfer must reject when the caller actually consumes it
+                // instead of surfacing partial bytes.
+                if let Some(err) = self.body_error.take() {
+                    return Err(Exception::throw_message(ctx, &err));
+                }
+                Ok(bytes)
             }
-            ResponseBody::Shared(shared) => collect_shared_body(ctx, signal, shared).await,
             ResponseBody::Consumed => Err(Exception::throw_message(
                 ctx,
                 "The response has already been consumed",
@@ -1237,58 +1128,21 @@ impl HttpResponse {
     }
 }
 
-async fn collect_shared_body<'js>(
-    ctx: &Ctx<'js>,
-    signal: Option<Value<'js>>,
-    shared: SharedResponseBody,
-) -> rquickjs::Result<Vec<u8>> {
-    with_abort_signal(ctx, signal, async {
-        shared_response_body::collect(ctx, shared).await
-    })
-    .await
-}
-
-enum ResponseBodyStreamSource {
-    Bytes(Vec<u8>),
-    Native(NativeResponseBody),
-    Shared(SharedResponseBody),
-}
-
-/// Response body reader backing `response.body` / `ReadableStream`.
-#[derive(rquickjs::class::Trace, JsLifetime)]
+/// Response body reader backing `response.body` / `ReadableStream`. Because Preview 3 responses
+/// are buffered eagerly, this simply serves the buffered bytes in chunks.
+#[derive(Default, rquickjs::class::Trace, JsLifetime)]
 #[rquickjs::class(rename_all = "camelCase")]
 pub struct ResponseBodyStream {
     #[qjs(skip_trace)]
-    state: Rc<RefCell<ResponseBodyStreamState>>,
-}
-
-struct ResponseBodyStreamState {
-    source: Option<ResponseBodyStreamSource>,
-    shared_completion: Option<SharedBodyCompletion<NativeResponseBody>>,
+    bytes: Option<Vec<u8>>,
     position: usize,
-    active_abort: Option<AbortHandle>,
-    discarded: bool,
-}
-
-impl Default for ResponseBodyStream {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[rquickjs::methods(rename_all = "camelCase")]
 impl ResponseBodyStream {
     #[qjs(constructor)]
     pub fn new() -> Self {
-        Self {
-            state: Rc::new(RefCell::new(ResponseBodyStreamState {
-                source: None,
-                shared_completion: None,
-                position: 0,
-                active_abort: None,
-                discarded: false,
-            })),
-        }
+        Self::default()
     }
 
     #[qjs(get, rename = "type")]
@@ -1297,113 +1151,23 @@ impl ResponseBodyStream {
     }
 
     pub async fn pull<'js>(
-        &self,
+        &mut self,
         ctx: Ctx<'js>,
     ) -> rquickjs::Result<List<(Option<TypedArray<'js, u8>>, Option<String>)>> {
-        let (source, position) = {
-            let mut state = self.state.borrow_mut();
-            if state.discarded {
-                return Ok(List((None, None)));
-            }
-            (state.source.take(), state.position)
-        };
-        let Some(source) = source else {
+        const CHUNK_SIZE: usize = 16384;
+        let Some(bytes) = self.bytes.as_ref() else {
             return Ok(List((None, None)));
         };
-        let (abort_handle, abort_registration) = AbortHandle::new_pair();
-        self.state.borrow_mut().active_abort = Some(abort_handle);
-        let pull_ctx = ctx.clone();
-        let pull = async move {
-            let result = match source {
-                ResponseBodyStreamSource::Bytes(bytes) => {
-                    if position >= bytes.len() {
-                        (None, None)
-                    } else {
-                        let end = (position + 16 * 1024).min(bytes.len());
-                        let chunk = bytes[position..end].to_vec();
-                        (Some(chunk), Some(ResponseBodyStreamSource::Bytes(bytes)))
-                    }
-                }
-                ResponseBodyStreamSource::Native(mut native) => {
-                    let chunk = native
-                        .read_chunk()
-                        .await
-                        .map_err(|error| Exception::throw_message(&pull_ctx, &error))?;
-                    let source = chunk
-                        .as_ref()
-                        .map(|_| ResponseBodyStreamSource::Native(native));
-                    (chunk, source)
-                }
-                ResponseBodyStreamSource::Shared(shared) => {
-                    let chunk = shared_response_body::read_chunk(&pull_ctx, &shared).await?;
-                    let source = chunk
-                        .as_ref()
-                        .map(|_| ResponseBodyStreamSource::Shared(shared));
-                    (chunk, source)
-                }
-            };
-            Ok::<_, rquickjs::Error>(result)
-        };
-        let outcome = Abortable::new(pull, abort_registration).await;
-        let (chunk, source) = match outcome {
-            Ok(result) => result?,
-            Err(_) => {
-                let mut state = self.state.borrow_mut();
-                state.active_abort = None;
-                state.discarded = true;
-                return Err(Exception::throw_message(
-                    &ctx,
-                    "Response body stream was discarded",
-                ));
-            }
-        };
-        let mut state = self.state.borrow_mut();
-        state.active_abort = None;
-        if !state.discarded {
-            state.source = source;
+        if self.position >= bytes.len() {
+            return Ok(List((None, None)));
         }
-        let Some(chunk) = chunk else {
-            return Ok(List((None, None)));
-        };
-        let array = TypedArray::new_copy(ctx.clone(), &chunk).map_err(|_| {
+        let end = (self.position + CHUNK_SIZE).min(bytes.len());
+        let chunk = &bytes[self.position..end];
+        let array = TypedArray::new_copy(ctx.clone(), chunk).map_err(|_| {
             Exception::throw_message(&ctx, "Failed to create TypedArray from response body chunk")
         })?;
-        state.position += chunk.len();
+        self.position = end;
         Ok(List((Some(array), None)))
-    }
-
-    pub fn discard(&self) {
-        let (source, abort) = {
-            let mut state = self.state.borrow_mut();
-            state.discarded = true;
-            (state.source.take(), state.active_abort.take())
-        };
-        drop(source);
-        if let Some(abort) = abort {
-            abort.abort();
-        }
-    }
-
-    pub async fn wait_for_discard(&self) {
-        let completion = self.state.borrow_mut().shared_completion.take();
-        if let Some(completion) = completion {
-            completion.wait().await;
-        }
-    }
-}
-
-impl ResponseBodyStream {
-    fn from_source(source: ResponseBodyStreamSource) -> Self {
-        let response = Self::new();
-        let completion = match &source {
-            ResponseBodyStreamSource::Shared(shared) => Some(shared.completion()),
-            ResponseBodyStreamSource::Bytes(_) | ResponseBodyStreamSource::Native(_) => None,
-        };
-        let mut state = response.state.borrow_mut();
-        state.source = Some(source);
-        state.shared_completion = completion;
-        drop(state);
-        response
     }
 }
 
@@ -1676,14 +1440,7 @@ fn is_https_to_http(from_url: &Url, to_url: &Url) -> bool {
 // JavaScript sources (shared with the Preview 2 path).
 // ---------------------------------------------------------------------------
 
-#[cfg(not(feature = "internal-test-execution"))]
 pub const HTTP_JS: &str = include_str!("http.js");
-#[cfg(feature = "internal-test-execution")]
-pub const HTTP_JS: &str = concat!(
-    include_str!("http.js"),
-    "\n",
-    include_str!("http_internal_test.js")
-);
 pub const FETCH_BLOB_JS: &str = include_str!("fetch-blob-4.0.0.js");
 pub const FORMDATA_JS: &str = include_str!("formdata-polyfill-4.0.10.js");
 

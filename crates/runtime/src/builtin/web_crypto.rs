@@ -529,7 +529,14 @@ fn aes_wrap_nopad_encrypt(key: &[u8], iv: [u8; 8], plaintext: &[u8]) -> Option<V
 
     let n = plaintext.len() / 8;
     let mut a = iv;
-    let mut r: Vec<[u8; 8]> = plaintext.as_chunks::<8>().0.to_vec();
+    let mut r: Vec<[u8; 8]> = plaintext
+        .chunks_exact(8)
+        .map(|chunk| {
+            let mut block = [0u8; 8];
+            block.copy_from_slice(chunk);
+            block
+        })
+        .collect();
 
     for j in 0..6 {
         for (i, ri) in r.iter_mut().enumerate() {
@@ -567,7 +574,14 @@ fn aes_wrap_nopad_unwrap_raw(key: &[u8], ciphertext: &[u8]) -> Option<([u8; 8], 
 
     let mut a = [0u8; 8];
     a.copy_from_slice(&ciphertext[..8]);
-    let mut r: Vec<[u8; 8]> = ciphertext[8..].as_chunks::<8>().0.to_vec();
+    let mut r: Vec<[u8; 8]> = ciphertext[8..]
+        .chunks_exact(8)
+        .map(|chunk| {
+            let mut block = [0u8; 8];
+            block.copy_from_slice(chunk);
+            block
+        })
+        .collect();
 
     for j in (0..6).rev() {
         for i in (0..n).rev() {
@@ -671,13 +685,13 @@ fn des3_cbc_encrypt_no_padding(key: &[u8], iv: &[u8; 8], data: &[u8]) -> Option<
     use cipher::BlockEncryptMut;
     use cipher::KeyIvInit;
 
-    if !data.len().is_multiple_of(8) {
+    if data.len() % 8 != 0 {
         return None;
     }
 
     let mut enc = cbc::Encryptor::<des::TdesEde3>::new_from_slices(key, iv).ok()?;
     let mut output = Vec::with_capacity(data.len());
-    for chunk in data.as_chunks::<8>().0 {
+    for chunk in data.chunks_exact(8) {
         let mut block = cipher::Block::<des::TdesEde3>::default();
         block.copy_from_slice(chunk);
         enc.encrypt_block_mut(&mut block);
@@ -691,13 +705,13 @@ fn des3_cbc_decrypt_no_padding(key: &[u8], iv: &[u8; 8], data: &[u8]) -> Option<
     use cipher::BlockDecryptMut;
     use cipher::KeyIvInit;
 
-    if !data.len().is_multiple_of(8) {
+    if data.len() % 8 != 0 {
         return None;
     }
 
     let mut dec = cbc::Decryptor::<des::TdesEde3>::new_from_slices(key, iv).ok()?;
     let mut output = Vec::with_capacity(data.len());
-    for chunk in data.as_chunks::<8>().0 {
+    for chunk in data.chunks_exact(8) {
         let mut block = cipher::Block::<des::TdesEde3>::default();
         block.copy_from_slice(chunk);
         dec.decrypt_block_mut(&mut block);
@@ -708,7 +722,7 @@ fn des3_cbc_decrypt_no_padding(key: &[u8], iv: &[u8; 8], data: &[u8]) -> Option<
 
 #[cfg(feature = "crypto-full")]
 fn des3_wrap_encrypt(key: &[u8], plaintext: &[u8]) -> Option<Vec<u8>> {
-    if !plaintext.len().is_multiple_of(8) {
+    if plaintext.len() % 8 != 0 {
         return None;
     }
 
@@ -814,8 +828,10 @@ fn gcm_ghash(h: u128, aad: &[u8], ciphertext: &[u8]) -> [u8; 16] {
     input.extend_from_slice(&(ciphertext.len() as u64 * 8).to_be_bytes());
 
     let mut y = 0u128;
-    for block in input.as_chunks::<16>().0 {
-        y ^= u128::from_be_bytes(*block);
+    for block in input.chunks_exact(16) {
+        let mut b = [0u8; 16];
+        b.copy_from_slice(block);
+        y ^= u128::from_be_bytes(b);
         y = gcm_mul(y, h);
     }
     y.to_be_bytes()
@@ -838,8 +854,10 @@ fn gcm_compute_j0(h: u128, iv: &[u8]) -> [u8; 16] {
     input.extend_from_slice(&(iv.len() as u64 * 8).to_be_bytes());
 
     let mut y = 0u128;
-    for block in input.as_chunks::<16>().0 {
-        y ^= u128::from_be_bytes(*block);
+    for block in input.chunks_exact(16) {
+        let mut b = [0u8; 16];
+        b.copy_from_slice(block);
+        y ^= u128::from_be_bytes(b);
         y = gcm_mul(y, h);
     }
     y.to_be_bytes()
@@ -4507,7 +4525,7 @@ fn rsa_pkcs1_type1_pad(data: &[u8], size: usize) -> Option<Vec<u8>> {
     let mut result = Vec::with_capacity(size);
     result.push(0x00);
     result.push(0x01);
-    result.extend(std::iter::repeat_n(0xff, padding_len));
+    result.extend(std::iter::repeat(0xff).take(padding_len));
     result.push(0x00);
     result.extend_from_slice(data);
     Some(result)
@@ -4859,7 +4877,7 @@ trait BigUintExt {
 #[cfg(feature = "crypto-full")]
 impl BigUintExt for BigUint {
     fn is_even(&self) -> bool {
-        self.to_bytes_le().first().is_none_or(|b| b & 1 == 0)
+        self.to_bytes_le().first().map_or(true, |b| b & 1 == 0)
     }
 }
 
@@ -5054,7 +5072,7 @@ fn dh_set_private_key_impl(id: u32, key: &[u8]) -> bool {
 #[cfg(feature = "crypto-full")]
 fn dh_is_group_impl(id: u32) -> bool {
     let contexts = DH_CONTEXTS.lock().unwrap();
-    contexts.get(&id).is_some_and(|s| s.is_group)
+    contexts.get(&id).map_or(false, |s| s.is_group)
 }
 
 #[cfg(not(feature = "crypto-full"))]

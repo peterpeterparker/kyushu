@@ -1,8 +1,7 @@
 use golem_websocket::{Error as WsError, Message, WebsocketConnection};
 use rquickjs::class::Trace;
-use rquickjs::{Ctx, Exception, JsLifetime, TypedArray};
+use rquickjs::{Ctx, Exception, JsLifetime};
 use std::cell::RefCell;
-use std::rc::Rc;
 
 /// Upper bound (in milliseconds) that a Preview 2 `receive_with_timeout` host call may block the
 /// single-threaded runtime before the receive loop yields.
@@ -79,7 +78,7 @@ fn ws_connect_impl(
 
     match WebsocketConnection::connect(&url, headers.as_deref()) {
         Ok(conn) => Ok(WsConnection {
-            inner: RefCell::new(Some(Rc::new(conn))),
+            inner: RefCell::new(Some(conn)),
         }),
         Err(e) => Err(Exception::throw_message(
             ctx,
@@ -92,7 +91,7 @@ fn ws_connect_impl(
 #[rquickjs::class]
 pub struct WsConnection {
     #[qjs(skip_trace)]
-    inner: RefCell<Option<Rc<WebsocketConnection>>>,
+    inner: RefCell<Option<WebsocketConnection>>,
 }
 
 #[rquickjs::methods]
@@ -114,11 +113,7 @@ impl WsConnection {
             .map_err(|e| Exception::throw_message(&ctx, &format!("WebSocket send failed: {e:?}")))
     }
 
-    pub fn send_binary(&self, ctx: Ctx<'_>, data: TypedArray<'_, u8>) -> rquickjs::Result<()> {
-        let data = data
-            .as_bytes()
-            .ok_or_else(|| Exception::throw_message(&ctx, "WebSocket data buffer is detached"))?
-            .to_vec();
+    pub fn send_binary(&self, ctx: Ctx<'_>, data: Vec<u8>) -> rquickjs::Result<()> {
         let inner = self.inner.borrow();
         let conn = inner
             .as_ref()
@@ -138,14 +133,14 @@ impl WsConnection {
     pub async fn receive<'js>(&self, ctx: Ctx<'js>) -> rquickjs::Result<rquickjs::Value<'js>> {
         #[cfg(feature = "p3")]
         {
-            let conn = self
-                .inner
-                .borrow()
-                .as_ref()
-                .cloned()
-                .ok_or_else(|| Exception::throw_message(&ctx, "WebSocket is closed"))?;
-            let result = conn.receive().await;
-            receive_result_to_js(&ctx, result)
+            let result = {
+                let inner = self.inner.borrow();
+                let conn = inner
+                    .as_ref()
+                    .ok_or_else(|| Exception::throw_message(&ctx, "WebSocket is closed"))?;
+                conn.receive().await
+            };
+            return receive_result_to_js(&ctx, result);
         }
 
         #[cfg(feature = "p2")]

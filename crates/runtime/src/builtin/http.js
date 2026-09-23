@@ -7,25 +7,6 @@ import * as base64 from 'base64-js';
 // Partially based on https://github.com/JakeChampion/fetch/blob/main/fetch.js
 // Depends on https://github.com/jimmywarting/FormData and https://github.com/node-fetch/fetch-blob
 
-const normalizedFetchMethods = new Set(['DELETE', 'GET', 'HEAD', 'OPTIONS', 'POST', 'PUT']);
-
-function normalizeFetchMethod(method) {
-    const value = String(method);
-    const upper = value.toUpperCase();
-    return normalizedFetchMethods.has(upper) ? upper : value;
-}
-
-function viewToBytes(view) {
-    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-}
-
-function snapshotBufferSource(value) {
-    const bytes = value instanceof ArrayBuffer ? new Uint8Array(value) : viewToBytes(value);
-    const copy = new Uint8Array(bytes.byteLength);
-    copy.set(bytes);
-    return copy;
-}
-
 // Defined as a plain (non-async) function so its prototype is
 // `Function.prototype` (not `AsyncFunction.prototype`) — which Node's vendored
 // `parallel/test-fetch.mjs` asserts. We deliberately do NOT use a
@@ -49,7 +30,7 @@ export function fetch(resource, options = {}) {
         let signal;
 
         if (typeof resource === 'object' && resource instanceof Request) {
-            method = normalizeFetchMethod(resource.method);
+            method = resource.method.toUpperCase();
             const headers = resource.headers;
             if (!headers.has('Accept')) {
                 headers.set('Accept', '*/*');
@@ -73,7 +54,7 @@ export function fetch(resource, options = {}) {
             body = resource._body;
             url = resource.url;
         } else {
-            method = normalizeFetchMethod(options.method || 'GET');
+            method = (options.method || 'GET').toUpperCase();
             const headers = new Headers(options.headers || {});
             if (!headers.has('Accept')) {
                 headers.set('Accept', '*/*');
@@ -126,7 +107,7 @@ export function fetch(resource, options = {}) {
 
             fetchPromise = streamingRequest(
                 url, method, rawHeaders, version, mode, referer, referrerPolicy, credentials, redirect,
-                bodyCreator, signal
+                bodyCreator
             );
         } else {
             // Simple request
@@ -146,8 +127,10 @@ export function fetch(resource, options = {}) {
                 // no body
             } else if (body instanceof ArrayBuffer) {
                 request.arrayBufferBody(body);
-            } else if (ArrayBuffer.isView(body)) {
-                request.uint8ArrayBody(viewToBytes(body));
+            } else if (body instanceof DataView) {
+                request.uint8ArrayBody(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+            } else if (body instanceof Uint8Array) {
+                request.uint8ArrayBody(body);
             } else if (body instanceof URLSearchParams) {
                 request.addHeader('Content-Type', 'application/x-www-form-urlencoded');
                 request.stringBody(body.toString());
@@ -158,13 +141,36 @@ export function fetch(resource, options = {}) {
             }
 
             fetchPromise = (async () => {
-                const nativeResponse = await request.simpleSend(signal);
-                return new Response(nativeResponse, request.url, credentials, false, signal);
+                const nativeResponse = await request.simpleSend();
+                return new Response(nativeResponse, request.url, credentials);
             })();
+        }
+
+        // If signal is provided, wrap the promise to support abort
+        if (signal) {
+            fetchPromise = abortableFetch(fetchPromise, signal);
         }
 
         return fetchPromise;
     })();
+}
+
+function abortableFetch(fetchPromise, signal) {
+    // Create a race between the fetch and the abort signal
+    return Promise.race([
+        fetchPromise,
+        new Promise((_, reject) => {
+            // If signal is already aborted, this won't execute
+            if (signal.aborted) {
+                reject(signal.reason || new DOMException('The operation was aborted.', 'AbortError'));
+            } else {
+                // Listen for abort event
+                signal.addEventListener('abort', () => {
+                    reject(signal.reason || new DOMException('The operation was aborted.', 'AbortError'));
+                });
+            }
+        })
+    ]);
 }
 
 // Marker tag for body source (ReadableStream/Blob/FormData) errors so the
@@ -172,21 +178,8 @@ export function fetch(resource, options = {}) {
 // arise when the server closes the upload (e.g. on an early redirect).
 const BODY_SOURCE_ERROR = Symbol('bodySourceError');
 
-function stopUpload(abortRef) {
-    abortRef.aborted = true;
-    if (abortRef.reader) {
-        try { abortRef.reader.cancel().catch(() => {}); } catch (_) { /* ignore */ }
-    }
-    if (abortRef.bodyWriter) {
-        const bodyWriter = abortRef.bodyWriter;
-        abortRef.bodyWriter = null;
-        try { bodyWriter.abortBody(); } catch (_) { /* ignore */ }
-    }
-}
-
-async function sendBody(bodyWriter, body, abortRef, onFirstChunk) {
+async function sendBody(bodyWriter, body, abortRef) {
     const reader = body.getReader();
-    abortRef.reader = reader;
     try {
         while (true) {
             if (abortRef.aborted) {
@@ -211,7 +204,6 @@ async function sendBody(bodyWriter, body, abortRef, onFirstChunk) {
             }
             try {
                 await bodyWriter.writeRequestBodyChunk(value);
-                onFirstChunk();
             } catch (err) {
                 // Transport/write error. If we've been aborted (e.g. because
                 // a redirect arrived), swallow it — the redirect path handles
@@ -221,13 +213,11 @@ async function sendBody(bodyWriter, body, abortRef, onFirstChunk) {
             }
         }
     } finally {
-        abortRef.reader = null;
         try { reader.releaseLock(); } catch (_) { /* ignore */ }
     }
     if (abortRef.aborted) return;
     try {
         bodyWriter.finishBody();
-        abortRef.bodyWriter = null;
     } catch (err) {
         if (abortRef.aborted) return;
         throw err;
@@ -236,7 +226,7 @@ async function sendBody(bodyWriter, body, abortRef, onFirstChunk) {
 
 async function streamingRequest(
     url, method, headers, version, mode, referer, referrerPolicy, credentials, redirect,
-    bodyCreator, signal
+    bodyCreator
 ) {
     let currentUrl = url;
     let currentMethod = method;
@@ -246,22 +236,7 @@ async function streamingRequest(
     const maxRedirects = 20;
     let currentRedirects = 0;
 
-    let activeAbortRef = null;
-    const onSignalAbort = () => {
-        if (activeAbortRef) stopUpload(activeAbortRef);
-    };
-    if (signal) {
-        if (signal.aborted) {
-            throw signal.reason || new DOMException('The operation was aborted.', 'AbortError');
-        }
-        signal.addEventListener('abort', onSignalAbort);
-    }
-
-    try {
     while (true) {
-        if (signal && signal.aborted) {
-            throw signal.reason || new DOMException('The operation was aborted.', 'AbortError');
-        }
         const request = new httpNative.HttpRequest(
             currentUrl,
             currentMethod,
@@ -281,24 +256,13 @@ async function streamingRequest(
         // Track body upload state synchronously so we can inspect it from the
         // redirect path without having to await the upload promise (which may
         // never finish for slow/infinite streaming bodies).
-        const abortRef = {aborted: false, reader: null, bodyWriter: bodyWriter};
-        activeAbortRef = abortRef;
+        const abortRef = {aborted: false};
         const bodyState = {settled: false, ok: true, error: undefined};
-        let firstChunkWritten = false;
-        let notifyFirstChunk;
-        const firstChunkPromise = new Promise((resolve) => {
-            notifyFirstChunk = () => {
-                if (!firstChunkWritten) {
-                    firstChunkWritten = true;
-                    resolve();
-                }
-            };
-        });
         let bodyPromise;
 
         if (currentBodyCreator && (currentMethod !== 'GET' && currentMethod !== 'HEAD')) {
             const bodyStream = currentBodyCreator();
-            bodyPromise = sendBody(bodyWriter, bodyStream, abortRef, notifyFirstChunk).then(
+            bodyPromise = sendBody(bodyWriter, bodyStream, abortRef).then(
                 () => {
                     bodyState.settled = true;
                     bodyState.ok = true;
@@ -311,19 +275,11 @@ async function streamingRequest(
             );
         } else {
             bodyWriter.finishBody();
-            abortRef.bodyWriter = null;
             bodyState.settled = true;
             bodyPromise = Promise.resolve();
         }
 
-        let nativeResponse;
-        try {
-            nativeResponse = await request.receiveResponse(signal);
-        } catch (e) {
-            stopUpload(abortRef);
-            bodyPromise.catch(() => {});
-            throw e;
-        }
+        const nativeResponse = await request.receiveResponse();
 
         const status = nativeResponse.status;
         const isRedirectStatus = status >= 300 && status < 400 && // is redirect
@@ -332,14 +288,10 @@ async function streamingRequest(
             status !== 306; // SWITCH PROXY
 
         if (isRedirectStatus) {
-            // If the body source has not produced anything yet, preserve the
-            // race between its first pull and the redirect. A source failure is
-            // authoritative even if the server has already sent the redirect;
-            // once a chunk has been written, the redirect may cancel an
-            // otherwise unbounded upload.
-            if (!firstChunkWritten && !bodyState.settled) {
-                await Promise.race([bodyPromise, firstChunkPromise]);
-            }
+            // Always surface a body source error that has already manifested
+            // before we observed the redirect — those are genuine failures of
+            // the user's stream/blob/formdata and should not be silently
+            // swallowed even when the server happened to redirect.
             if (bodyState.settled && !bodyState.ok &&
                 bodyState.error && bodyState.error[BODY_SOURCE_ERROR]) {
                 throw bodyState.error;
@@ -349,16 +301,13 @@ async function streamingRequest(
             // and slow/infinite streaming bodies must not delay redirect
             // handling. Signal the upload to abort and ignore further errors
             // (transport errors after this point are expected).
-            stopUpload(abortRef);
+            abortRef.aborted = true;
             // Suppress unhandled-rejection noise on the detached promise.
             bodyPromise.catch(() => {});
         } else {
             // Non-redirect: wait for the body upload to complete and propagate
             // any error (whether source-side or transport-side).
             await bodyPromise;
-            if (signal && signal.aborted) {
-                throw signal.reason || new DOMException('The operation was aborted.', 'AbortError');
-            }
             if (!bodyState.ok) {
                 throw bodyState.error;
             }
@@ -421,7 +370,6 @@ async function streamingRequest(
                     currentUrl = newUrl;
                     currentMethod = newMethod;
                     currentRedirects++;
-                    nativeResponse.discardBody();
                     continue;
                 }
             }
@@ -429,7 +377,7 @@ async function streamingRequest(
             throw new Error("Unexpected redirect");
         }
 
-        const response = new Response(nativeResponse, currentUrl, credentials, false, signal);
+        const response = new Response(nativeResponse, currentUrl, credentials);
         if (currentRedirects > 0) {
             response.nativeResponse.redirected = true;
         }
@@ -448,17 +396,10 @@ async function streamingRequest(
 
         return response;
     }
-    } finally {
-        if (signal) signal.removeEventListener('abort', onSignalAbort);
-    }
-}
-
-function responseAbortReason(signal) {
-    return signal?.reason || new DOMException('The operation was aborted.', 'AbortError');
 }
 
 export class Response {
-    constructor(bodyOrNative, initOrUrl, credentials, isError = false, signal = undefined) {
+    constructor(bodyOrNative, initOrUrl, credentials, isError = false) {
         if (bodyOrNative instanceof httpNative.HttpResponse) {
             // Internal path: constructed from native HttpResponse
             this.nativeResponse = bodyOrNative;
@@ -467,29 +408,6 @@ export class Response {
             this._credentials = credentials || 'same-origin';
             this._isError = isError;
             this._isNative = true;
-            this._signal = signal;
-            this._abortBodyListener = undefined;
-            this._bodyStream = undefined;
-            this._nativeBodyState = {source: undefined, controller: undefined, discarded: false};
-            if (signal?.aborted) {
-                this.nativeResponse.discardBody();
-            } else if (signal) {
-                const responseRef = new WeakRef(this);
-                this._abortBodyListener = () => {
-                    const response = responseRef.deref();
-                    if (!response) return;
-                    const bodyState = response._nativeBodyState;
-                    bodyState.discarded = true;
-                    if (bodyState.source) {
-                        bodyState.source.discard();
-                    } else if (!response.bodyUsed) {
-                        response.nativeResponse.discardBody();
-                    }
-                    bodyState.controller?.error(responseAbortReason(signal));
-                    response._detachAbortBodyListener();
-                };
-                signal.addEventListener('abort', this._abortBodyListener, {once: true});
-            }
         } else {
             // Standard Web API path: new Response(body, init)
             const body = bodyOrNative;
@@ -502,17 +420,7 @@ export class Response {
             this._credentials = 'same-origin';
             this._isError = false;
             this._isNative = false;
-            this._signal = undefined;
-            this._body = body instanceof ArrayBuffer || ArrayBuffer.isView(body)
-                ? snapshotBufferSource(body)
-                : body !== undefined && body !== null ? body : null;
-        }
-    }
-
-    _detachAbortBodyListener() {
-        if (this._signal && this._abortBodyListener) {
-            this._signal.removeEventListener('abort', this._abortBodyListener);
-            this._abortBodyListener = undefined;
+            this._body = body !== undefined && body !== null ? body : null;
         }
     }
 
@@ -532,57 +440,33 @@ export class Response {
 
     get body() {
         if (this._isNative) {
-            if (this._bodyStream !== undefined) return this._bodyStream;
+            let nativeStreamSourceSlot = {
+                nativeStreamSource: undefined
+            };
             let response = this;
-            const bodyState = this._nativeBodyState;
-            this._bodyStream = new ReadableStream({
-                start(controller) {
-                    bodyState.controller = controller;
+            return new ReadableStream({
+                start() {
                 },
                 get type() {
                     return "bytes";
                 },
                 async pull(controller) {
-                    response.bodyUsed = true;
-                    if (response._signal?.aborted) throw responseAbortReason(response._signal);
-                    if (bodyState.source === undefined) {
-                        bodyState.source = response.nativeResponse.stream();
+                    if (nativeStreamSourceSlot.nativeStreamSource === undefined) {
+                        nativeStreamSourceSlot.nativeStreamSource = response.nativeResponse.stream();
+                        response.bodyUsed = true;
                     }
 
-                    let next;
-                    let err;
-                    try {
-                        [next, err] = await bodyState.source.pull();
-                    } catch (error) {
-                        response._detachAbortBodyListener();
-                        if (response._signal?.aborted) throw responseAbortReason(response._signal);
-                        throw error;
-                    }
+                    const [next, err] = await nativeStreamSourceSlot.nativeStreamSource.pull();
                     if (err !== undefined) {
-                        response._detachAbortBodyListener();
                         console.error("Error reading response body stream:", err);
                         controller.error(err);
                     } else if (next === undefined) {
-                        response._detachAbortBodyListener();
                         controller.close();
                     } else {
                         controller.enqueue(next);
                     }
-                },
-                cancel() {
-                    response.bodyUsed = true;
-                    bodyState.discarded = true;
-                    if (bodyState.source) {
-                        response._detachAbortBodyListener();
-                        bodyState.source.discard();
-                        return bodyState.source.waitForDiscard();
-                    } else {
-                        response._detachAbortBodyListener();
-                        return response.nativeResponse.discardBodyAndWait();
-                    }
                 }
             });
-            return this._bodyStream;
         }
 
         if (this._body === null) {
@@ -599,8 +483,8 @@ export class Response {
             bytes = new TextEncoder().encode(body);
         } else if (body instanceof ArrayBuffer) {
             bytes = new Uint8Array(body);
-        } else if (ArrayBuffer.isView(body)) {
-            bytes = viewToBytes(body);
+        } else if (body instanceof Uint8Array) {
+            bytes = body;
         } else if (body instanceof Blob) {
             return body.stream();
         } else {
@@ -703,30 +587,14 @@ export class Response {
     }
 
     clone() {
-        const bodyLocked = this._isNative
-            ? this._bodyStream?.locked === true
-            : this._body instanceof ReadableStream && this._body.locked;
-        if (this.bodyUsed || bodyLocked) {
+        if (this.bodyUsed) {
             throw new TypeError('Response body is already consumed');
         }
 
         if (this._isNative) {
-            const nativeClone = this.nativeResponse.clone();
-            return new Response(
-                nativeClone,
-                this.url,
-                this._credentials,
-                this._isError,
-                this._signal,
-            );
+            return new Response(this.nativeResponse.clone(), this.url, this._credentials, this._isError);
         }
-        let clonedBody = this._body;
-        if (this._body instanceof ReadableStream) {
-            const [originalBranch, clonedBranch] = this._body.tee();
-            this._body = originalBranch;
-            clonedBody = clonedBranch;
-        }
-        const cloned = new Response(clonedBody, {
+        const cloned = new Response(this._body, {
             status: this._status,
             statusText: this._statusText,
             headers: this._headers,
@@ -755,16 +623,9 @@ export class Response {
 
     async arrayBuffer() {
         if (this._isNative) {
+            let result = await this.nativeResponse.arrayBuffer();
             this.bodyUsed = true;
-            if (this._signal?.aborted) throw responseAbortReason(this._signal);
-            try {
-                return await this.nativeResponse.arrayBuffer(this._signal);
-            } catch (error) {
-                if (this._signal?.aborted) throw responseAbortReason(this._signal);
-                throw error;
-            } finally {
-                this._detachAbortBodyListener();
-            }
+            return result;
         }
         this.bodyUsed = true;
         if (this._body === null) {
@@ -773,9 +634,8 @@ export class Response {
         if (this._body instanceof ArrayBuffer) {
             return this._body;
         }
-        if (ArrayBuffer.isView(this._body)) {
-            const bytes = viewToBytes(this._body);
-            return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        if (this._body instanceof Uint8Array) {
+            return this._body.buffer.slice(this._body.byteOffset, this._body.byteOffset + this._body.byteLength);
         }
         if (this._body instanceof Blob) {
             return this._body.arrayBuffer();
@@ -793,8 +653,7 @@ export class Response {
             const result = new Uint8Array(totalLength);
             let offset = 0;
             for (const chunk of chunks) {
-                const bytes = ArrayBuffer.isView(chunk) ? viewToBytes(chunk) : new Uint8Array(chunk);
-                result.set(bytes, offset);
+                result.set(new Uint8Array(chunk.buffer || chunk), offset);
                 offset += chunk.byteLength;
             }
             return result.buffer;
@@ -819,16 +678,9 @@ export class Response {
 
     async text() {
         if (this._isNative) {
+            let result = await this.nativeResponse.text();
             this.bodyUsed = true;
-            if (this._signal?.aborted) throw responseAbortReason(this._signal);
-            try {
-                return await this.nativeResponse.text(this._signal);
-            } catch (error) {
-                if (this._signal?.aborted) throw responseAbortReason(this._signal);
-                throw error;
-            } finally {
-                this._detachAbortBodyListener();
-            }
+            return result;
         }
         this.bodyUsed = true;
         if (this._body === null) {
@@ -970,17 +822,15 @@ export class Headers {
 export class Request {
     constructor(input, options = {}) {
         if (input instanceof Request) {
-            if (input._bodyUsed && input._body != null) {
-                throw new TypeError('Request body is already consumed');
-            }
             this._url = input._url;
             this._headers = new Headers(input._headers);
             this._bodyUsed = false;
             this._options = { ...input._options };
-            // Clone the request body. Buffered bodies have already been extracted from any mutable
-            // caller-owned BufferSource, so the internal value is replayable. A ReadableStream body
-            // has a single reader, so it is tee'd per the Fetch standard: the original keeps one
-            // branch and the clone gets the other.
+            // Clone the request body. Buffered bodies (string / typed arrays / URLSearchParams /
+            // Blob / FormData) are replayable, so sharing the reference is safe and leaves the
+            // original request undisturbed. A ReadableStream body has a single reader, so it is
+            // tee'd per the Fetch standard: the original keeps one branch and the clone gets the
+            // other.
             if (input._body instanceof ReadableStream) {
                 const [originalBranch, clonedBranch] = input._body.tee();
                 input._body = originalBranch;
@@ -995,9 +845,7 @@ export class Request {
             this._options = {
                 ...options,
             };
-            this._body = options.body instanceof ArrayBuffer || ArrayBuffer.isView(options.body)
-                ? snapshotBufferSource(options.body)
-                : options.body;
+            this._body = options.body;
         }
     }
 
@@ -1016,8 +864,11 @@ export class Request {
         } else if (this._body instanceof ArrayBuffer) {
             const blob = new Blob([this._body]);
             return blob.stream();
-        } else if (ArrayBuffer.isView(this._body)) {
-            const blob = new Blob([viewToBytes(this._body)]);
+        } else if (this._body instanceof DataView) {
+            const blob = new Blob([this._body.buffer.slice(this._body.byteOffset, this._body.byteOffset + this._body.byteLength)]);
+            return blob.stream();
+        } else if (this._body instanceof Uint8Array) {
+            const blob = new Blob([this._body]);
             return blob.stream();
         } else if (typeof this._body === 'string' || this._body instanceof String) {
             const blob = new Blob([this._body]);
@@ -1065,7 +916,7 @@ export class Request {
     }
 
     get method() {
-        return normalizeFetchMethod(this._options.method ?? 'GET');
+        return this._options.method ?? 'GET';
     }
 
     get mode() {
@@ -1105,9 +956,10 @@ export class Request {
             return new TextEncoder().encode(this._body.toString()).buffer;
         } else if (this._body instanceof ArrayBuffer) {
             return this._body;
-        } else if (ArrayBuffer.isView(this._body)) {
-            const bytes = viewToBytes(this._body);
-            return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        } else if (this._body instanceof DataView) {
+            return this._body.buffer.slice(this._body.byteOffset, this._body.byteOffset + this._body.byteLength);
+        } else if (this._body instanceof Uint8Array) {
+            return this._body.buffer;
         } else if (typeof this._body === 'string' || this._body instanceof String) {
             return new TextEncoder().encode(this._body).buffer;
         } else {
@@ -1129,8 +981,10 @@ export class Request {
             return new Blob([this._body.toString()]);
         } else if (this._body instanceof ArrayBuffer) {
             return new Blob([this._body]);
-        } else if (ArrayBuffer.isView(this._body)) {
-            return new Blob([viewToBytes(this._body)]);
+        } else if (this._body instanceof DataView) {
+            return new Blob([this._body.buffer.slice(this._body.byteOffset, this._body.byteOffset + this._body.byteLength)]);
+        } else if (this._body instanceof Uint8Array) {
+            return new Blob([this._body]);
         } else if (typeof this._body === 'string' || this._body instanceof String) {
             return new Blob([this._body]);
         } else {
@@ -1145,15 +999,17 @@ export class Request {
             return new Uint8Array(await streamToArrayBuffer(this._body));
         } else if (this._body instanceof FormData) {
             const blob = formDataToBlob(this._body);
-            return new Uint8Array(await blob.arrayBuffer());
+            return blob.bytes();
         } else if (this._body instanceof Blob) {
-            return new Uint8Array(await this._body.arrayBuffer());
+            return this._body.bytes();
         } else if (this._body instanceof URLSearchParams) {
             return new TextEncoder().encode(this._body.toString());
         } else if (this._body instanceof ArrayBuffer) {
             return new Uint8Array(this._body);
-        } else if (ArrayBuffer.isView(this._body)) {
-            return viewToBytes(this._body).slice();
+        } else if (this._body instanceof DataView) {
+            return new Uint8Array(this._body.buffer, this._body.byteOffset, this._body.byteLength);
+        } else if (this._body instanceof Uint8Array) {
+            return this._body;
         } else if (typeof this._body === 'string' || this._body instanceof String) {
             return new TextEncoder().encode(this._body);
         } else {
@@ -1447,8 +1303,8 @@ export class XMLHttpRequest {
                      fetchOptions.body = this._requestBody;
                  } else if (this._requestBody instanceof ArrayBuffer) {
                      fetchOptions.body = this._requestBody;
-                 } else if (ArrayBuffer.isView(this._requestBody)) {
-                     fetchOptions.body = viewToBytes(this._requestBody);
+                 } else if (this._requestBody instanceof Uint8Array) {
+                     fetchOptions.body = this._requestBody;
                  } else if (this._requestBody instanceof URLSearchParams) {
                      fetchOptions.body = this._requestBody;
                  } else {

@@ -11,8 +11,6 @@ const inspectDiffOptions = {
     showHidden: false,
     showProxy: false,
 };
-const RegExpPrototypeExec = RegExp.prototype.exec;
-const RegExpPrototypeSourceGetter = Object.getOwnPropertyDescriptor(RegExp.prototype, 'source').get;
 
 function inspectForDiff(value) {
     return inspect(value, inspectDiffOptions);
@@ -21,20 +19,6 @@ function inspectForDiff(value) {
 function isError(e) {
     return e instanceof Error ||
         (e !== null && typeof e === 'object' && Object.prototype.toString.call(e) === '[object Error]');
-}
-
-function isRegExp(value) {
-    if (value === null || typeof value !== 'object') return false;
-    try {
-        RegExpPrototypeSourceGetter.call(value);
-        return true;
-    } catch (_) {
-        return false;
-    }
-}
-
-function regexpTest(regexp, string) {
-    return RegExpPrototypeExec.call(regexp, String(string)) !== null;
 }
 
 function copyError(source) {
@@ -488,19 +472,8 @@ function parseStackFrames(stack) {
     return frames;
 }
 
-function isEvalStackFrame(frame) {
-    if (!frame || typeof frame.functionName !== 'string') {
-        return false;
-    }
-    return frame.functionName === 'eval' || frame.functionName === '<eval>';
-}
-
 function resolveSourceForFrame(frame, currentModuleSource) {
     if (!frame || typeof frame.fileName !== 'string') {
-        return undefined;
-    }
-
-    if (isEvalStackFrame(frame)) {
         return undefined;
     }
 
@@ -928,9 +901,6 @@ function getErrMessage(stackStartFn) {
             continue;
         }
         if (typeof frame.fileName === 'string' && frame.fileName.startsWith('node:')) {
-            return undefined;
-        }
-        if (isEvalStackFrame(frame)) {
             return undefined;
         }
         break;
@@ -1911,7 +1881,7 @@ function compareExceptionKey(actual, expected, key, message, keys, fn) {
                 actualSubset[currentKey] = actual[currentKey];
             }
             if (currentKey in expected) {
-                if (typeof actual[currentKey] === 'string' && isRegExp(expected[currentKey]) && regexpTest(expected[currentKey], actual[currentKey])) {
+                if (typeof actual[currentKey] === 'string' && expected[currentKey] instanceof RegExp && expected[currentKey].test(actual[currentKey])) {
                     expectedSubset[currentKey] = actual[currentKey];
                 } else {
                     expectedSubset[currentKey] = expected[currentKey];
@@ -1945,9 +1915,9 @@ function expectedException(actual, expected, message, fn) {
     let throwError = false;
 
     if (typeof expected !== 'function') {
-        if (isRegExp(expected)) {
+        if (expected instanceof RegExp) {
             const str = String(actual);
-            if (regexpTest(expected, str)) {
+            if (expected.test(str)) {
                 return;
             }
 
@@ -1981,7 +1951,7 @@ function expectedException(actual, expected, message, fn) {
 
             for (let keyIdx = 0; keyIdx < keys.length; keyIdx++) {
                 const key = keys[keyIdx];
-                if (typeof actual[key] === 'string' && isRegExp(expected[key]) && regexpTest(expected[key], actual[key])) {
+                if (typeof actual[key] === 'string' && expected[key] instanceof RegExp && expected[key].test(actual[key])) {
                     continue;
                 }
                 compareExceptionKey(actual, expected, key, message, keys, fn);
@@ -2167,8 +2137,8 @@ function expectsError(stackStartFn, actual, error, message) {
 
 function hasMatchingError(actual, expected) {
     if (typeof expected !== 'function') {
-        if (isRegExp(expected)) {
-            return regexpTest(expected, String(actual));
+        if (expected instanceof RegExp) {
+            return expected.test(String(actual));
         }
         throw new ERR_INVALID_ARG_TYPE('expected', ['Function', 'RegExp'], expected);
     }
@@ -2251,7 +2221,7 @@ function ifError(value) {
 }
 
 function match(string, regexp, message) {
-    if (!isRegExp(regexp)) {
+    if (!(regexp instanceof RegExp)) {
         let err = new ERR_INVALID_ARG_TYPE('regexp', 'RegExp', regexp);
         throw err;
     }
@@ -2274,7 +2244,7 @@ function match(string, regexp, message) {
             generatedMessage: true
         });
     }
-    if (!regexpTest(regexp, string)) {
+    if (!regexp.test(string)) {
         innerFail({
             actual: string,
             expected: regexp,
@@ -2287,7 +2257,7 @@ function match(string, regexp, message) {
 }
 
 function doesNotMatch(string, regexp, message) {
-    if (!isRegExp(regexp)) {
+    if (!(regexp instanceof RegExp)) {
         let err = new ERR_INVALID_ARG_TYPE('regexp', 'RegExp', regexp);
         throw err;
     }
@@ -2310,7 +2280,7 @@ function doesNotMatch(string, regexp, message) {
             generatedMessage: true
         });
     }
-    if (regexpTest(regexp, string)) {
+    if (regexp.test(string)) {
         innerFail({
             actual: string,
             expected: regexp,

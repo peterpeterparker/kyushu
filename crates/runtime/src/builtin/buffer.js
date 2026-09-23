@@ -80,19 +80,6 @@ function installRepeatLimitGuard (maxStringLength) {
 
 installRepeatLimitGuard(K_STRING_MAX_LENGTH)
 
-// Node keeps the public, deprecated Buffer constructor separate from the
-// internal Uint8Array subclass used by typed-array species construction.
-// Sharing the prototype preserves Buffer identity without routing internal
-// allocations through Buffer(), which would emit DEP0005.
-class FastBuffer extends Uint8Array {}
-Buffer.prototype = FastBuffer.prototype
-Object.defineProperty(Buffer.prototype, 'constructor', {
-    configurable: true,
-    enumerable: false,
-    value: Buffer,
-    writable: true,
-})
-
 Buffer.TYPED_ARRAY_SUPPORT = true
 
 Object.defineProperty(Buffer.prototype, 'parent', {
@@ -115,7 +102,10 @@ function createBuffer (length) {
     if (length > K_MAX_LENGTH) {
         throw new ERR_OUT_OF_RANGE('size', '>= 0 and <= ' + K_MAX_LENGTH, length)
     }
-    return new FastBuffer(length)
+    // Return an augmented `Uint8Array` instance
+    const buf = new Uint8Array(length)
+    Object.setPrototypeOf(buf, Buffer.prototype)
+    return buf
 }
 
 function markArrayBufferAsUntransferable (arrayBuffer) {
@@ -161,7 +151,9 @@ function allocFromPool (size) {
     allocationPoolOffset += size
     alignPoolOffset()
 
-    return new FastBuffer(allocationPool.buffer, start, size)
+    const buf = allocationPool.subarray(start, start + size)
+    Object.setPrototypeOf(buf, Buffer.prototype)
+    return buf
 }
 
 /**
@@ -287,11 +279,6 @@ Buffer.from = function (value, encodingOrOffset, length) {
 
 Object.setPrototypeOf(Buffer.prototype, Uint8Array.prototype)
 Object.setPrototypeOf(Buffer, Uint8Array)
-Object.defineProperty(Buffer, Symbol.species, {
-    configurable: true,
-    enumerable: false,
-    get: function () { return FastBuffer },
-})
 
 function assertSize (size) {
     if (typeof size !== 'number') {
@@ -490,12 +477,15 @@ function fromArrayBuffer (array, byteOffset, length) {
 
     let buf
     if (byteOffset === undefined && length === undefined) {
-        buf = new FastBuffer(source)
+        buf = new Uint8Array(source)
     } else if (length === undefined) {
-        buf = new FastBuffer(source, byteOffset)
+        buf = new Uint8Array(source, byteOffset)
     } else {
-        buf = new FastBuffer(source, byteOffset, length)
+        buf = new Uint8Array(source, byteOffset, length)
     }
+
+    // Return an augmented `Uint8Array` instance
+    Object.setPrototypeOf(buf, Buffer.prototype)
 
     return buf
 }
@@ -1373,32 +1363,32 @@ function utf16leSlice (buf, start, end) {
     return res
 }
 
-function toIntegerOrInfinity (value) {
-    const number = +value
-    if (number === 0 || Number.isNaN(number)) return 0
-    if (number === Infinity || number === -Infinity) return number
-    return Math.trunc(number)
-}
-
-function adjustOffset (offset, length) {
-    const relativeOffset = toIntegerOrInfinity(offset)
-    if (relativeOffset === -Infinity) return 0
-    if (relativeOffset < 0) return Math.max(length + relativeOffset, 0)
-    return Math.min(relativeOffset, length)
-}
-
-Buffer.prototype.subarray = function subarray (start, end) {
-    const srcLength = this.length
-    const startOffset = adjustOffset(start, srcLength)
-    const endOffset = end === undefined ? srcLength : adjustOffset(end, srcLength)
-    const newLength = endOffset > startOffset ? endOffset - startOffset : 0
-    // Construct the view directly so this method neither allocates an
-    // intermediate Uint8Array nor consults a receiver-controlled species.
-    return new FastBuffer(this.buffer, this.byteOffset + startOffset, newLength)
-}
-
 Buffer.prototype.slice = function slice (start, end) {
-    return this.subarray(start, end)
+    const len = this.length
+    start = ~~start
+    end = end === undefined ? len : ~~end
+
+    if (start < 0) {
+        start += len
+        if (start < 0) start = 0
+    } else if (start > len) {
+        start = len
+    }
+
+    if (end < 0) {
+        end += len
+        if (end < 0) end = 0
+    } else if (end > len) {
+        end = len
+    }
+
+    if (end < start) end = start
+
+    const newBuf = this.subarray(start, end)
+    // Return an augmented `Uint8Array` instance
+    Object.setPrototypeOf(newBuf, Buffer.prototype)
+
+    return newBuf
 }
 
 /*

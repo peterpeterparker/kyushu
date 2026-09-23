@@ -8,14 +8,11 @@ import { ERR_INVALID_ARG_TYPE, ERR_INVALID_ARG_VALUE } from '__wasm_rquickjs_bui
 import { validateNumber, validateInteger } from '__wasm_rquickjs_builtin/internal/validators';
 
 let currentSuite = null;
-
-function activeTestEntryFile(moduleContext) {
-    if (globalThis.process && Array.isArray(globalThis.process.argv) &&
-        typeof globalThis.process.argv[1] === 'string') {
-        return globalThis.process.argv[1];
-    }
-    return moduleContext ? moduleContext.filename : undefined;
-}
+// Check for globalThis-based filter (set by test harness before file execution)
+let _subtestFilter = (typeof globalThis.__wasm_rquickjs_node_test_filter === 'number')
+    ? globalThis.__wasm_rquickjs_node_test_filter
+    : null;
+let _subtestRegistrationIndex = 0;
 
 // --- Custom assertions registry (testAssertions.register) ---
 const _customAssertions = {};
@@ -440,7 +437,7 @@ function runTest(parsed, parentSuite) {
     // Handle todo
     const isTodo = options.todo === true || typeof options.todo === 'string';
 
-    const filePath = activeTestEntryFile(moduleContext);
+    const filePath = moduleContext ? moduleContext.filename : undefined;
     const ctx = new TestContext(name, parentSuite, filePath);
 
     // Collect beforeEach from parent suite chain
@@ -570,7 +567,7 @@ function runSuite(name, options, fn, parentSuite, moduleContext) {
 
     const isTodo = options.todo === true || typeof options.todo === 'string';
 
-    const filePath = activeTestEntryFile(moduleContext);
+    const filePath = moduleContext ? moduleContext.filename : undefined;
     const suite = new SuiteContext(name, parentSuite, filePath);
     const prevSuite = currentSuite;
     currentSuite = suite;
@@ -708,12 +705,25 @@ let _pendingTestPromises = [];
 
 // --- Public API ---
 
+function shouldSkipByFilter() {
+    if (_subtestFilter === null && typeof globalThis.__wasm_rquickjs_node_test_filter === 'number') {
+        _subtestFilter = globalThis.__wasm_rquickjs_node_test_filter;
+    }
+    const currentIndex = _subtestRegistrationIndex++;
+    return _subtestFilter !== null && currentIndex !== _subtestFilter;
+}
+
 function test(nameOrOpts, optionsOrFn, maybeFn) {
     const parsed = parseTestArgs(nameOrOpts, optionsOrFn, maybeFn);
 
     if (currentSuite) {
         // Inside a describe/suite — register for later execution
         currentSuite.tests.push(parsed);
+        return Promise.resolve(undefined);
+    }
+
+    if (shouldSkipByFilter()) {
+        // Silently skip — filtered out
         return Promise.resolve(undefined);
     }
 
@@ -777,6 +787,11 @@ function describe(nameOrOpts, optionsOrFn, maybeFn) {
             fn: parsed.fn,
             moduleContext: parsed.moduleContext
         });
+        return;
+    }
+
+    if (shouldSkipByFilter()) {
+        // Silently skip — filtered out
         return;
     }
 
@@ -1276,6 +1291,16 @@ function run() {
     return { on: function () { return this; }, once: function () { return this; } };
 }
 
+function __setFilterIndex(idx) {
+    _subtestFilter = idx;
+    _subtestRegistrationIndex = 0;
+}
+
+function __clearFilter() {
+    _subtestFilter = null;
+    _subtestRegistrationIndex = 0;
+}
+
 async function _awaitPendingTests() {
     while (_pendingTestPromises.length > 0) {
         const promises = _pendingTestPromises;
@@ -1296,7 +1321,9 @@ export {
     mock,
     run,
     testAssertionsModule as assert,
-    _awaitPendingTests
+    _awaitPendingTests,
+    __setFilterIndex,
+    __clearFilter
 };
 
 export default test;

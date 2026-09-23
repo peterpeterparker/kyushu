@@ -6,9 +6,7 @@ import {
     write_stdout,
     write_stderr,
     hrtime_ns,
-    memory_usage as _native_memory_usage,
-    has_typescript_runtime,
-    typescript_runtime_mode
+    memory_usage as _native_memory_usage
 } from '__wasm_rquickjs_builtin/process_native';
 
 import EventEmitter from 'node:events';
@@ -204,14 +202,11 @@ process.config = {
         asan: 0,
         openssl_quic: 0,
         node_module_version: 127,
-        node_use_amaro: has_typescript_runtime(),
     },
 };
 Object.freeze(process.config.target_defaults);
 Object.freeze(process.config.variables);
 Object.freeze(process.config);
-process.execArgv = [];
-const typescriptRuntimeMode = typescript_runtime_mode();
 process.features = {
     inspector: false,
     debug: false,
@@ -223,8 +218,9 @@ process.features = {
     tls: false,
     cached_builtins: true,
     require_module: true,
-    typescript: typescriptRuntimeMode ?? false,
+    typescript: false,
 };
+process.execArgv = [];
 process.execPath = '/usr/local/bin/node';
 let _title = 'wasm-rquickjs';
 Object.defineProperty(process, 'title', {
@@ -235,192 +231,6 @@ Object.defineProperty(process, 'title', {
 });
 process.release = { name: 'node' };
 process.allowedNodeEnvironmentFlags = new Set();
-
-const _reportOptions = {
-    directory: '',
-    filename: '',
-    compact: false,
-    excludeNetwork: false,
-    signal: 'SIGUSR2',
-    reportOnFatalError: false,
-    reportOnSignal: false,
-    reportOnUncaughtException: false,
-    excludeEnv: false,
-};
-
-function _reportStringOption(name, value) {
-    if (typeof value !== 'string') {
-        throw _makeTypeError(
-            'ERR_INVALID_ARG_TYPE',
-            'The "' + name + '" property must be of type string.' + _invalidArgTypeHelper(value),
-        );
-    }
-    _reportOptions[name] = value;
-}
-
-function _reportBooleanOption(name, value) {
-    if (typeof value !== 'boolean') {
-        throw _makeTypeError(
-            'ERR_INVALID_ARG_TYPE',
-            'The "' + name + '" property must be of type boolean.' + _invalidArgTypeHelper(value),
-        );
-    }
-    _reportOptions[name] = value;
-}
-
-function _diagnosticReport(error) {
-    if (error === undefined) {
-        error = new Error('JavaScript Callstack');
-        error.name = 'Error [ERR_SYNTHETIC]';
-        const frames = String(error.stack).split('\n').slice(1);
-        error.stack = 'Error [ERR_SYNTHETIC]: JavaScript Callstack\n' + frames.join('\n');
-    }
-    const now = new Date();
-    const memory = process.memoryUsage();
-    const usage = process.cpuUsage();
-    const hasStack = error !== null && typeof error.stack === 'string';
-    const stackLines = hasStack ? error.stack.split('\n') : [];
-    return {
-        header: {
-            reportVersion: 5,
-            event: 'JavaScript API',
-            trigger: 'GetReport',
-            filename: null,
-            dumpEventTime: now.toISOString(),
-            dumpEventTimeStamp: String(now.getTime()),
-            processId: process.pid,
-            threadId: 0,
-            cwd: process.cwd(),
-            commandLine: process.argv.slice(),
-            nodejsVersion: process.version,
-            wordSize: 32,
-            arch: process.arch,
-            platform: process.platform,
-            componentVersions: Object.assign({}, process.versions),
-            release: Object.assign({}, process.release),
-            cpus: [],
-            networkInterfaces: [],
-            host: '',
-        },
-        javascriptStack: {
-            message: hasStack ? stackLines[0] : 'No stack.',
-            stack: hasStack ? stackLines.slice(1) : [],
-            errorProperties: {},
-        },
-        javascriptHeap: {
-            totalMemory: memory.heapTotal,
-            executableMemory: 0,
-            totalCommittedMemory: memory.heapTotal,
-            availableMemory: 0,
-            totalGlobalHandlesMemory: 0,
-            usedGlobalHandlesMemory: 0,
-            usedMemory: memory.heapUsed,
-            memoryLimit: memory.heapTotal,
-            mallocedMemory: memory.external,
-            externalMemory: memory.external,
-            peakMallocedMemory: memory.rss,
-            nativeContextCount: 1,
-            detachedContextCount: 0,
-            doesZapGarbage: 0,
-            heapSpaces: {},
-        },
-        nativeStack: [],
-        resourceUsage: {
-            userCpuSeconds: usage.user / 1e6,
-            kernelCpuSeconds: usage.system / 1e6,
-            cpuConsumptionPercent: 0,
-            userCpuConsumptionPercent: 0,
-            kernelCpuConsumptionPercent: 0,
-            maxRss: memory.rss,
-            pageFaults: { IORequired: 0, IONotRequired: 0 },
-            fsActivity: { reads: 0, writes: 0 },
-        },
-        libuv: [],
-        workers: [],
-        environmentVariables: _reportOptions.excludeEnv ? {} : Object.assign({}, process.env),
-        userLimits: {},
-        sharedObjects: [],
-    };
-}
-
-function _defaultReportFilename() {
-    const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '');
-    return 'report.' + stamp + '.' + process.pid + '.0.001.json';
-}
-
-process.report = {
-    getReport(error) {
-        if (error !== undefined &&
-            (error === null || typeof error !== 'object' || Array.isArray(error))) {
-            throw _makeTypeError(
-                'ERR_INVALID_ARG_TYPE',
-                'The "err" argument must be of type object.' + _invalidArgTypeHelper(error),
-            );
-        }
-        return _diagnosticReport(error);
-    },
-    writeReport(filename, error) {
-        if (filename !== undefined && filename !== null && typeof filename === 'object') {
-            error = filename;
-            filename = undefined;
-        } else if (filename !== undefined && typeof filename !== 'string') {
-            throw _makeTypeError(
-                'ERR_INVALID_ARG_TYPE',
-                'The "file" argument must be of type string.' + _invalidArgTypeHelper(filename),
-            );
-        }
-        if (error !== undefined &&
-            (error === null || typeof error !== 'object' || Array.isArray(error))) {
-            throw _makeTypeError(
-                'ERR_INVALID_ARG_TYPE',
-                'The "err" argument must be of type object.' + _invalidArgTypeHelper(error),
-            );
-        }
-        const selected = filename || _reportOptions.filename || _defaultReportFilename();
-        const output = _reportOptions.directory && selected.charCodeAt(0) !== 47
-            ? _reportOptions.directory.replace(/\/+$/, '') + '/' + selected
-            : selected;
-        const createRequire = globalThis.__wasm_rquickjs_create_require;
-        if (typeof createRequire !== 'function') {
-            throw _makeError('ERR_FEATURE_UNAVAILABLE_ON_PLATFORM', 'process.report.writeReport is unavailable');
-        }
-        const fs = createRequire(process.cwd(), null)('node:fs');
-        const report = _diagnosticReport(error);
-        report.header.filename = output;
-        fs.writeFileSync(output, JSON.stringify(report, null, _reportOptions.compact ? 0 : 2));
-        return output;
-    },
-};
-
-for (const name of ['directory', 'filename', 'signal']) {
-    Object.defineProperty(process.report, name, {
-        get() { return _reportOptions[name]; },
-        set(value) { _reportStringOption(name, value); },
-        enumerable: true,
-        configurable: true,
-    });
-}
-for (const name of [
-    'compact',
-    'excludeNetwork',
-    'reportOnFatalError',
-    'reportOnSignal',
-    'reportOnUncaughtException',
-    'excludeEnv',
-]) {
-    Object.defineProperty(process.report, name, {
-        get() { return _reportOptions[name]; },
-        set(value) { _reportBooleanOption(name, value); },
-        enumerable: true,
-        configurable: true,
-    });
-}
-Object.defineProperty(process, Symbol.toStringTag, {
-    value: 'process',
-    writable: true,
-    enumerable: false,
-    configurable: true,
-});
 
 let _startTime = null;
 
@@ -596,10 +406,8 @@ globalThis.__wasm_rquickjs_handleUncaughtError = __wasm_rquickjs_handleUncaughtE
 
 function __drainNextTickQueue() {
     __nextTickWakeupScheduled = false;
-    let drained = 0;
     while (__nextTickQueue.length > 0) {
         const entry = __nextTickQueue.shift();
-        drained += 1;
         try {
             if (entry.domain) {
                 entry.domain.enter();
@@ -615,7 +423,6 @@ function __drainNextTickQueue() {
             __wasm_rquickjs_handleUncaughtError(e, entry.domain);
         }
     }
-    return drained;
 }
 
 function __requestNextTickWakeup() {
@@ -632,8 +439,9 @@ function __requestNextTickWakeup() {
     }
 }
 
-// Expose the drain function for the Rust turn-checkpoint bridge, which owns
-// draining nextTick before QuickJS jobs and host callbacks.
+// Expose the drain function so that timer callbacks can drain pending
+// nextTick work before executing, matching Node.js's guarantee that
+// process.nextTick always fires before timers (setTimeout/setImmediate).
 globalThis.__wasm_rquickjs_drainNextTick = __drainNextTickQueue;
 globalThis.__wasm_rquickjs_requestNextTickWakeup = __requestNextTickWakeup;
 
@@ -867,9 +675,7 @@ process.emitWarning = function emitWarning(warning, typeOrOptions, code, ctor) {
         }
     }
     let obj;
-    let createdWarning = false;
     if (typeof warning === 'string') {
-        createdWarning = true;
         obj = new Error(warning);
         obj.name = (typeof typeOrOptions === 'string') ? typeOrOptions : 'Warning';
         if (typeof typeOrOptions === 'object' && typeOrOptions !== null) {
@@ -888,22 +694,6 @@ process.emitWarning = function emitWarning(warning, typeOrOptions, code, ctor) {
     if (isDeprecationWarning && process.noDeprecation) {
         return;
     }
-    const warningCode = obj.code ? ' [' + String(obj.code) + ']' : '';
-    const warningHeader = warningName + ': ' + String(obj.message || obj);
-    const stderrHeader = warningName + warningCode + ': ' + String(obj.message || obj);
-    let formattedStack;
-    if (typeof obj.stack === 'string') {
-        const newline = obj.stack.indexOf('\n');
-        const rest = newline === -1 ? '' : obj.stack.slice(newline);
-        formattedStack = obj.stack.startsWith(warningHeader)
-            ? obj.stack
-            : warningHeader + rest;
-    } else {
-        formattedStack = warningHeader;
-    }
-    if (createdWarning) {
-        obj.stack = formattedStack;
-    }
 
     const suppressDefaultWarning = !!globalThis.__wasm_rquickjs_suppress_warning_stderr;
     const shouldThrowDeprecation = isDeprecationWarning && !!process.throwDeprecation;
@@ -912,14 +702,12 @@ process.emitWarning = function emitWarning(warning, typeOrOptions, code, ctor) {
             throw obj;
         }
         if (!suppressDefaultWarning && process.stderr && typeof process.stderr.write === 'function') {
-            let text = stderrHeader;
-            if (typeof formattedStack === 'string') {
-                text = formattedStack.indexOf(String(obj.message || obj)) >= 0
-                    ? formattedStack
-                    : stderrHeader + '\n' + formattedStack;
-                if (warningCode && text.startsWith(warningHeader)) {
-                    text = stderrHeader + text.slice(warningHeader.length);
-                }
+            const header = warningName + ': ' + String(obj.message || obj);
+            let text = header;
+            if (typeof obj.stack === 'string') {
+                text = obj.stack.indexOf(String(obj.message || obj)) >= 0
+                    ? obj.stack
+                    : header + '\n' + obj.stack;
             }
             process.stderr.write(text.endsWith('\n') ? text : text + '\n');
         }
@@ -1001,130 +789,20 @@ process._runExitHandlers = function _runExitHandlers(code) {
 // after a microtask turn, so that assert.rejects() and similar patterns
 // that handle the rejection synchronously don't cause false positives.
 const _pendingRejections = new Map();
-const _ignoredUnhandledRejections = new WeakSet();
-const _emittedUnhandledRejections = new WeakSet();
-const _pendingRejectionHandled = new Set();
-const _requireEsmRejectionScopes = [];
-const _sameValue = Object.is;
-let _nextRequireEsmRejectionScope = 0;
-
-function _isIgnoredUnhandledRejection(promise) {
-    return _ignoredUnhandledRejections.has(promise);
-}
 
 globalThis.__wasm_rquickjs_rejection_tracker = function(promise, reason, isHandled) {
-    if (_isIgnoredUnhandledRejection(promise)) {
-        _pendingRejections.delete(promise);
-        _pendingRejectionHandled.delete(promise);
-        return;
-    }
     if (!isHandled) {
-        _pendingRejections.set(promise, { reason });
-        const scope = _requireEsmRejectionScopes[_requireEsmRejectionScopes.length - 1];
-        if (scope !== undefined) {
-            scope.promises.push(promise);
-        }
+        _pendingRejections.set(promise, reason);
+        Promise.resolve().then(function() {
+        Promise.resolve().then(function() {
+            if (_pendingRejections.has(promise)) {
+                _pendingRejections.delete(promise);
+                process.emit('unhandledRejection', reason, promise);
+            }
+        });
+        });
     } else {
-        if (!_pendingRejections.delete(promise) && _emittedUnhandledRejections.has(promise)) {
-            _emittedUnhandledRejections.delete(promise);
-            _pendingRejectionHandled.add(promise);
-        }
-    }
-};
-
-// Called only by the host event-loop checkpoint after process.nextTick and
-// QuickJS jobs have stabilized. Keeping this private avoids introducing a
-// public timer whose lifetime or ordering would differ from Node's turn-end
-// promise rejection processing.
-globalThis.__wasm_rquickjs_unhandled_rejection_checkpoint = function() {
-    if (_pendingRejectionHandled.size === 0 && _pendingRejections.size === 0) {
-        return 0;
-    }
-
-    let emitted = 0;
-    const handled = Array.from(_pendingRejectionHandled);
-    for (const promise of handled) {
-        if (!_pendingRejectionHandled.delete(promise)) {
-            continue;
-        }
-        if (!_isIgnoredUnhandledRejection(promise)) {
-            emitted += 1;
-            try {
-                process.emit('rejectionHandled', promise);
-            } catch (error) {
-                __wasm_rquickjs_handleUncaughtError(error);
-            }
-        }
-    }
-
-    const pending = Array.from(_pendingRejections);
-    for (const [promise, entry] of pending) {
-        if (!_pendingRejections.has(promise)) {
-            continue;
-        }
         _pendingRejections.delete(promise);
-        if (!_isIgnoredUnhandledRejection(promise)) {
-            _emittedUnhandledRejections.add(promise);
-            emitted += 1;
-            try {
-                process.emit('unhandledRejection', entry.reason, promise);
-            } catch (error) {
-                __wasm_rquickjs_handleUncaughtError(error);
-            }
-        }
-    }
-    return emitted;
-};
-
-globalThis.__wasm_rquickjs_ignore_unhandled_rejection = function(promise) {
-    _ignoredUnhandledRejections.add(promise);
-    _pendingRejections.delete(promise);
-    _emittedUnhandledRejections.delete(promise);
-    _pendingRejectionHandled.delete(promise);
-};
-
-globalThis.__wasm_rquickjs_begin_require_esm_rejection_scope = function() {
-    const id = ++_nextRequireEsmRejectionScope;
-    _requireEsmRejectionScopes.push({ id, promises: [] });
-    return id;
-};
-
-function _takeRequireEsmRejectionScope(id) {
-    for (let i = _requireEsmRejectionScopes.length - 1; i >= 0; i--) {
-        if (_requireEsmRejectionScopes[i].id === id) {
-            return _requireEsmRejectionScopes.splice(i, 1)[0];
-        }
-    }
-    return undefined;
-}
-
-globalThis.__wasm_rquickjs_end_require_esm_rejection_scope = function(id) {
-    _takeRequireEsmRejectionScope(id);
-};
-
-globalThis.__wasm_rquickjs_ignore_require_esm_rejection = function(evaluationPromise, rejectedReason, id) {
-    const scope = _takeRequireEsmRejectionScope(id);
-    _ignoredUnhandledRejections.add(evaluationPromise);
-    _pendingRejections.delete(evaluationPromise);
-    _emittedUnhandledRejections.delete(evaluationPromise);
-    _pendingRejectionHandled.delete(evaluationPromise);
-
-    if (scope !== undefined) {
-        // QuickJS reports the internal module-evaluation promise immediately
-        // before the outward promise returned by JS_EvalFunction. Suppress only
-        // that pair. Searching backward for any still-pending promise can select
-        // an unrelated rejection created by user module code.
-        const evaluationIndex = scope.promises.length - 1;
-        if (evaluationIndex > 0 && scope.promises[evaluationIndex] === evaluationPromise) {
-            const modulePromise = scope.promises[evaluationIndex - 1];
-            const moduleEntry = _pendingRejections.get(modulePromise);
-            if (moduleEntry !== undefined && _sameValue(moduleEntry.reason, rejectedReason)) {
-                _ignoredUnhandledRejections.add(modulePromise);
-                _pendingRejections.delete(modulePromise);
-                _emittedUnhandledRejections.delete(modulePromise);
-                _pendingRejectionHandled.delete(modulePromise);
-            }
-        }
     }
 };
 
@@ -1147,7 +825,6 @@ export var cpuUsage = process.cpuUsage;
 export var memoryUsage = process.memoryUsage;
 export var uptime = process.uptime;
 export var release = process.release;
-export var report = process.report;
 export var stdin = process.stdin;
 export var kill = process.kill;
 export var emitWarning = process.emitWarning;

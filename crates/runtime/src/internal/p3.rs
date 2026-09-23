@@ -8,13 +8,14 @@
 
 use futures::future::{AbortHandle, Abortable};
 use rquickjs::function::{Args, Constructor, IntoArgs, This};
+use rquickjs::loader::{BuiltinLoader, BuiltinResolver, FileResolver};
 use rquickjs::promise::Promised;
 use rquickjs::{
-    AsyncContext, AsyncRuntime, CatchResultExt, CaughtError, Ctx, Error, Exception, Filter, FromJs,
-    Function, IntoJs, Module, Object, Persistent, Promise, String as JsString, Value, async_with,
+    AsyncContext, AsyncRuntime, CatchResultExt, CaughtError, Ctx, Error, Filter, FromJs, Function,
+    IntoJs, Module, Object, Persistent, Promise, String as JsString, Value, async_with,
 };
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -24,9 +25,11 @@ use wit_bindgen_p3::rt::async_support::{
     FutureReader, FutureWriter, StreamReader, StreamWriter, spawn_local,
 };
 
-use super::runtime_services::{
-    OwnedJsRuntime, RuntimeServices, initialize_builtin_wiring, initialize_dispose_symbols,
-    run_process_turn_checkpoint,
+use super::module_loading::{
+    CjsCompatLoader, CjsEvalResolver, DataUrlLoader, DataUrlResolver, FileUrlResolver,
+    ImportMetaInit, ImportMetaLoader, JsonFileLoader, MockModuleLoader, MockModuleResolver,
+    NodeFileResolver, NodeModuleErrorResolver, NodeModulesResolver, RealmGuardResolver,
+    inject_import_meta_prologue,
 };
 
 /// Global key under which the `Symbol.dispose` value is published. Resource classes generated
@@ -50,6 +53,9 @@ pub struct JsState {
     pub ctx: AsyncContext,
     pub exported_function_cache: RefCell<HashMap<&'static [&'static str], CachedExportedFunction>>,
     pub variant_case_tag_cache: RefCell<HashMap<&'static str, Persistent<JsString<'static>>>>,
+    pub abort_handles: RefCell<HashMap<usize, AbortHandle>>,
+    pub last_abort_id: AtomicUsize,
+    pub unrefed_timers: RefCell<HashSet<usize>>,
     /// Monotonic id allocator for exported resource instances (starts at 1; 0 is never used).
     pub last_resource_id: AtomicUsize,
     /// Ids of exported resource instances whose host handle has been dropped. Populated
@@ -57,10 +63,10 @@ pub struct JsState {
     /// of the next JS entry point, where the corresponding entry is removed from the JS resource
     /// table. See [`enqueue_drop_js_resource`] / [`drain_pending_resource_drops`].
     pub pending_resource_drops: RefCell<Vec<usize>>,
-    /// Runtime-level liveness lease for JavaScript producers feeding component futures/streams.
-    /// Such producers can remain backpressured after the import or export that created them has
-    /// produced its result, so the shared QuickJS scheduler must stay driven until they finish.
-    writer_lease: RuntimeWriterLease,
+    /// Present only during synchronous `FromJs` conversion of an exported function result.
+    /// Nested future/stream wrappers register writer tasks here so the enclosing export can keep
+    /// its scheduler driver alive until every writer reaches EOF or observes a dropped reader.
+    export_result_writer_group: RefCell<Option<Rc<ExportResultWriterGroup>>>,
 }
 
 pub struct CachedExportedFunction {
@@ -73,16 +79,121 @@ impl JsState {
     /// Create the runtime, context, resolvers and loaders. Does NOT evaluate any
     /// JavaScript, so it is safe to publish to `STATE` before `finish_init`.
     async fn new_base() -> Self {
-        let OwnedJsRuntime { rt, ctx } = OwnedJsRuntime::new().await;
+        let rt = AsyncRuntime::new().expect("Failed to create AsyncRuntime");
+        // Raise the GC threshold to reduce the chance of triggering a QuickJS-ng
+        // shape refcount bug during heavy async/promise workloads.
+        rt.set_gc_threshold(256 * 1024 * 1024).await;
+        let ctx = AsyncContext::full(&rt)
+            .await
+            .expect("Failed to create AsyncContext");
+
+        let mut builtin_resolver =
+            BuiltinResolver::default().with_module(crate::JS_EXPORT_MODULE_NAME);
+        for (name, _) in crate::JS_ADDITIONAL_MODULES.iter() {
+            builtin_resolver = builtin_resolver.with_module(name.to_string());
+        }
+        let builtin_resolver = crate::modules::add_native_module_resolvers(builtin_resolver);
+        let builtin_resolver = crate::builtin::add_module_resolvers(builtin_resolver);
+
+        // The resolver/loader stack must stay identical to the Preview 2 path
+        // (`internal/p2.rs::new_base`) so module resolution semantics (file/`node_modules`
+        // lookup, `data:`/`file://` URLs, module mocking, CJS-in-ESM compatibility, JSON
+        // modules and `import.meta`) do not diverge between the two targets.
+        let file_resolver = FileResolver::default()
+            .with_path("/")
+            .with_pattern("{}.js")
+            .with_pattern("{}.mjs")
+            .with_pattern("{}.json");
+
+        let resolver = (
+            (
+                RealmGuardResolver,
+                MockModuleResolver,
+                DataUrlResolver,
+                FileUrlResolver,
+                builtin_resolver,
+                NodeModulesResolver,
+                NodeFileResolver,
+            ),
+            (CjsEvalResolver, file_resolver, NodeModuleErrorResolver),
+        );
+
+        let mut builtin_loader = BuiltinLoader::default().with_module(
+            crate::JS_EXPORT_MODULE_NAME,
+            inject_import_meta_prologue(
+                &ImportMetaInit {
+                    url: format!(
+                        "file:///__wasm_rquickjs_virtual__/{}.mjs",
+                        crate::JS_EXPORT_MODULE_NAME
+                    ),
+                    filename: None,
+                    dirname: None,
+                    include_resolve: true,
+                },
+                crate::js_export_module(),
+            ),
+        );
+        for (name, get_module) in crate::JS_ADDITIONAL_MODULES.iter() {
+            let source = (get_module)();
+            let injected = inject_import_meta_prologue(
+                &ImportMetaInit {
+                    url: format!("file:///__wasm_rquickjs_virtual__/{}.mjs", name),
+                    filename: None,
+                    dirname: None,
+                    include_resolve: true,
+                },
+                &source,
+            );
+            builtin_loader = builtin_loader.with_module(name.to_string(), injected);
+        }
+
+        let loader = (
+            MockModuleLoader,
+            builtin_loader,
+            crate::modules::module_loader(),
+            crate::builtin::module_loader(),
+            DataUrlLoader,
+            JsonFileLoader,
+            CjsCompatLoader,
+            ImportMetaLoader,
+        );
+
+        rt.set_loader(resolver, loader).await;
+
+        // Module mocking (`test.mock.module`) allocates synthetic module ids from this
+        // counter; it must exist before any test file is loaded. Mirrors the Preview 2 path.
+        async_with!(ctx => |ctx| {
+            ctx.globals()
+                .set("__wasm_rquickjs_mock_seq", 0i64)
+                .expect("Failed to initialize mock sequence counter");
+        })
+        .await;
+
+        // `process.js` publishes `__wasm_rquickjs_rejection_tracker` to surface unhandled
+        // promise rejections as `process` events. Mirrors the Preview 2 path.
+        rt.set_host_promise_rejection_tracker(Some(Box::new(
+            |ctx, promise, reason, is_handled| {
+                if let Ok(handler) = ctx
+                    .globals()
+                    .get::<_, Function>("__wasm_rquickjs_rejection_tracker")
+                {
+                    let _ = handler.call::<_, Value>((promise, reason, is_handled));
+                }
+            },
+        )))
+        .await;
 
         Self {
             rt,
             ctx,
             exported_function_cache: RefCell::new(HashMap::new()),
             variant_case_tag_cache: RefCell::new(HashMap::new()),
+            abort_handles: RefCell::new(HashMap::new()),
+            last_abort_id: AtomicUsize::new(0),
+            unrefed_timers: RefCell::new(HashSet::new()),
             last_resource_id: AtomicUsize::new(1),
             pending_resource_drops: RefCell::new(Vec::new()),
-            writer_lease: RuntimeWriterLease::new(),
+            export_result_writer_group: RefCell::new(None),
         }
     }
 
@@ -90,13 +201,30 @@ impl JsState {
     /// Must run before user module code so bundled CJS-in-ESM shims see
     /// `globalThis.require`, `Buffer`, `process`, timers, and related globals.
     async fn init_engine(&self) {
-        // Dispose symbols must be initialized before builtins, since builtin
-        // modules use [Symbol.dispose] in their class definitions.
-        // In latest version of rquickjs Symbol.dispose are supported
-        // initialize_dispose_symbols(&self.ctx)
-        //             .await
-        //             .unwrap_or_else(|error| panic!("{error}"));
         async_with!(self.ctx => |ctx| {
+            // Resource classes generated for imported WIT resources wire `[Symbol.dispose]` onto
+            // their prototype via the global `DISPOSE_SYMBOL`, so it must be defined before the
+            // user module (which triggers resource-class registration) is imported.
+            // In latest version of rquickjs Symbol.dispose are supported
+            // Module::evaluate(
+            //     ctx.clone(),
+            //     "dispose",
+            //     format!(
+            //         r#"
+            //         const dispose = Symbol.for("dispose");
+            //         globalThis.{DISPOSE_SYMBOL} = dispose;
+            //         Symbol.dispose = dispose;
+            //         const asyncDispose = Symbol.for("asyncDispose");
+            //         Symbol.asyncDispose = asyncDispose;
+            //         "#
+            //     ),
+            // )
+            // .catch(&ctx)
+            // .unwrap_or_else(|e| panic!("Failed to evaluate dispose module initialization:\n{}", format_caught_error(e)))
+            // .finish::<()>()
+            // .catch(&ctx)
+            // .unwrap_or_else(|e| panic!("Failed to finish dispose module initialization:\n{}", format_caught_error(e)));
+
             // Table holding live exported resource instances (see `RESOURCE_TABLE_NAME`). Must exist
             // before any exported resource is constructed or any resource handle is lowered to JS.
             ctx.globals()
@@ -104,44 +232,17 @@ impl JsState {
                 .expect("Failed to initialize the exported resource table");
 
             // Helpers used by the generated `future<T>`/`stream<T>` bridges. `make_async_iterable`
-            // turns Rust-provided `pull()` and `close()` operations into a JS async-iterable;
-            // `get_async_iterator` normalizes any (async or sync) iterable passed from JS into an
-            // async iterator whose lifecycle operations always return promises.
+            // turns a Rust-provided `pull()` (returning a promise of `{ value, done }`) into a JS
+            // async-iterable; `get_async_iterator` normalizes any (async or sync) iterable passed
+            // from JS into an async iterator whose `next()` always returns a promise.
             Module::evaluate(
                 ctx.clone(),
                 "__wasm_rquickjs_async_values",
                 r#"
-                globalThis.__wasm_rquickjs_make_async_iterable = function (pull, close) {
-                    let closed = false;
-                    let closePromise;
-                    const closeOnce = function () {
-                        closed = true;
-                        if (closePromise === undefined) {
-                            try {
-                                closePromise = Promise.resolve(close());
-                            } catch (error) {
-                                closePromise = Promise.reject(error);
-                            }
-                        }
-                        return closePromise;
-                    };
+                globalThis.__wasm_rquickjs_make_async_iterable = function (pull) {
                     return {
                         [Symbol.asyncIterator]() {
-                            return {
-                                next() {
-                                    return closed
-                                        ? Promise.resolve({ done: true, value: undefined })
-                                        : pull();
-                                },
-                                async return(value) {
-                                    await closeOnce();
-                                    return { done: true, value };
-                                },
-                                async throw(reason) {
-                                    await closeOnce();
-                                    throw reason;
-                                },
-                            };
+                            return { next() { return pull(); } };
                         },
                     };
                 };
@@ -151,40 +252,9 @@ impl JsState {
                     }
                     if (iterable != null && typeof iterable[Symbol.iterator] === 'function') {
                         const it = iterable[Symbol.iterator]();
-                        const continueFromSync = async function (result) {
-                            if (result == null || typeof result !== 'object') {
-                                throw new TypeError('stream sync iterator method did not return an object');
-                            }
-                            return {
-                                done: Boolean(result.done),
-                                value: await result.value,
-                            };
-                        };
-                        return {
-                            next() { return continueFromSync(it.next()); },
-                            return(value) {
-                                return typeof it.return === 'function'
-                                    ? continueFromSync(it.return(value))
-                                    : Promise.resolve({ done: true, value });
-                            },
-                            throw(reason) {
-                                if (typeof it.throw === 'function') {
-                                    return continueFromSync(it.throw(reason));
-                                }
-                                return Promise.reject(reason);
-                            },
-                        };
+                        return { next() { return Promise.resolve(it.next()); } };
                     }
                     throw new TypeError('value provided for a component stream<T> is not (async) iterable');
-                };
-                globalThis.__wasm_rquickjs_close_async_iterator = async function (iterator) {
-                    if (typeof iterator.return !== 'function') {
-                        return;
-                    }
-                    const result = await iterator.return();
-                    if (result == null || typeof result !== 'object') {
-                        throw new TypeError('stream iterator return() did not resolve to an object');
-                    }
                 };
                 // Drives a JS (async/sync) iterable `source` into a component stream, calling the
                 // native `writeOne(item)` for each item and awaiting the promise it returns before
@@ -204,23 +274,8 @@ impl JsState {
                         }
                         // A sync iterable normalized into an async iterator can still yield
                         // promise-valued items; `for await` awaits each value, so do the same.
-                        let keepGoing;
-                        try {
-                            keepGoing = await writeOne(await result.value);
-                        } catch (error) {
-                            // This is an abrupt failure while consuming an item, so mirror
-                            // AsyncIteratorClose. Keep the payload/write error primary if cleanup
-                            // also rejects. A rejection from next() itself is outside this block
-                            // and must not call return().
-                            try {
-                                await globalThis.__wasm_rquickjs_close_async_iterator(iterator);
-                            } catch (_cleanupError) {
-                                // Preserve the primary consumption failure.
-                            }
-                            throw error;
-                        }
+                        const keepGoing = await writeOne(await result.value);
                         if (!keepGoing) {
-                            await globalThis.__wasm_rquickjs_close_async_iterator(iterator);
                             return;
                         }
                     }
@@ -233,11 +288,19 @@ impl JsState {
             .catch(&ctx)
             .unwrap_or_else(|e| panic!("Failed to finish async-value helpers:\n{}", format_caught_error(e)));
 
+            let wiring = crate::builtin::wire_builtins();
+            Module::evaluate(
+                ctx.clone(),
+                "__wasm_rquickjs_init_wiring",
+                wiring,
+            )
+            .catch(&ctx)
+            .unwrap_or_else(|e| panic!("Failed to evaluate built-in wiring:\n{}", format_caught_error(e)))
+            .finish::<()>()
+            .catch(&ctx)
+            .unwrap_or_else(|e| panic!("Failed to finish built-in wiring:\n{}", format_caught_error(e)));
         })
         .await;
-        initialize_builtin_wiring(&self.ctx)
-            .await
-            .unwrap_or_else(|error| panic!("{error}"));
         // Use the sentinel-backed drain (not a plain `idle()`): a user module may schedule an
         // unref'd timer at top level (e.g. `setInterval(...).unref()`), which would keep a plain
         // `idle()` from ever returning. Mirrors the Preview 2 init path.
@@ -294,17 +357,19 @@ impl JsState {
         self.init_user_module().await;
     }
 
-    /// Refresh host-derived process state after restoring a Wizer snapshot.
+    /// Refresh host-derived process state after restoring a Wizer snapshot. The P3 wrapper still
+    /// imports the synchronous Preview 2 environment interface through `std`, so this can run
+    /// before the first async export enters the component executor.
     async fn refresh_process_env(state: &JsState) {
-        let argv = wasip3::cli::environment::get_arguments();
+        let argv = wasip2::cli::environment::get_arguments();
         let env_vars: std::collections::HashMap<String, String> =
-            wasip3::cli::environment::get_environment()
+            wasip2::cli::environment::get_environment()
                 .into_iter()
                 .collect();
 
         async_with!(state.ctx => |ctx| {
             let globals = ctx.globals();
-            if globals.get::<_, rquickjs::Object>("process").is_ok() {
+            if let Ok(process) = globals.get::<_, rquickjs::Object>("process") {
                 let new_argv = rquickjs::Array::new(ctx.clone())
                     .expect("failed to create process.argv for Wizer restoration");
                 for (i, arg) in argv.iter().enumerate() {
@@ -436,174 +501,133 @@ pub fn get_js_state() -> &'static JsState {
     }
 }
 
-struct RuntimeWriterLease {
+struct ExportResultWriterGroup {
     active_writers: Cell<usize>,
-    writer_generation: Cell<usize>,
-    next_waiter_id: Cell<usize>,
-    activation_waiters: RefCell<HashMap<usize, futures::channel::oneshot::Sender<()>>>,
-    inactivity_waiters: RefCell<HashMap<usize, futures::channel::oneshot::Sender<()>>>,
+    drive_guard: RefCell<Option<DriveGuard>>,
 }
 
-impl RuntimeWriterLease {
+impl ExportResultWriterGroup {
     fn new() -> Self {
         Self {
             active_writers: Cell::new(0),
-            writer_generation: Cell::new(0),
-            next_waiter_id: Cell::new(0),
-            activation_waiters: RefCell::new(HashMap::new()),
-            inactivity_waiters: RefCell::new(HashMap::new()),
+            drive_guard: RefCell::new(None),
         }
     }
 
-    fn register_writer(&'static self) -> RuntimeWriterGuard {
-        if self.active_writers.get() == 0 {
-            for (_, waiter) in self.activation_waiters.borrow_mut().drain() {
-                let _ = waiter.send(());
-            }
-        }
+    fn register_writer(self: &Rc<Self>) -> ExportResultWriterGuard {
         self.active_writers.set(
             self.active_writers
                 .get()
                 .checked_add(1)
-                .expect("runtime writer lease count overflowed"),
+                .expect("export-result writer count overflowed"),
         );
-        self.writer_generation.set(
-            self.writer_generation
-                .get()
-                .checked_add(1)
-                .expect("runtime writer lease generation overflowed"),
-        );
-        RuntimeWriterGuard { lease: self }
+        ExportResultWriterGuard {
+            group: self.clone(),
+        }
     }
 
-    fn has_active_writers(&self) -> bool {
+    fn has_writers(&self) -> bool {
         self.active_writers.get() != 0
     }
 
-    fn writer_generation(&self) -> usize {
-        self.writer_generation.get()
-    }
-
-    fn retain_driver_if_active(&'static self, drive_guard: DriveGuard) -> Result<(), DriveGuard> {
-        if self.has_active_writers() {
-            spawn_local(cleanup_retained_driver(get_js_state(), drive_guard));
-            Ok(())
-        } else {
-            Err(drive_guard)
+    fn keep_driver_until_writers_finish(&self, drive_guard: DriveGuard) {
+        if self.has_writers() {
+            let previous = self.drive_guard.borrow_mut().replace(drive_guard);
+            assert!(
+                previous.is_none(),
+                "an export-result writer group already owns a scheduler driver"
+            );
         }
-    }
-
-    fn wait_for_activation_if_inactive(&'static self) -> Option<WriterActivationWaiter> {
-        if self.has_active_writers() {
-            return None;
-        }
-
-        let waiter_id = self.next_waiter_id.get();
-        self.next_waiter_id.set(
-            waiter_id
-                .checked_add(1)
-                .expect("runtime writer activation waiter id overflowed"),
-        );
-        let (sender, receiver) = futures::channel::oneshot::channel();
-        let previous = self
-            .activation_waiters
-            .borrow_mut()
-            .insert(waiter_id, sender);
-        debug_assert!(previous.is_none());
-        Some(WriterActivationWaiter {
-            lease: self,
-            waiter_id,
-            receiver,
-        })
-    }
-
-    fn wait_for_inactivity_if_active(&'static self) -> Option<WriterInactivityWaiter> {
-        if !self.has_active_writers() {
-            return None;
-        }
-
-        let waiter_id = self.next_waiter_id.get();
-        self.next_waiter_id.set(
-            waiter_id
-                .checked_add(1)
-                .expect("runtime writer inactivity waiter id overflowed"),
-        );
-        let (sender, receiver) = futures::channel::oneshot::channel();
-        let previous = self
-            .inactivity_waiters
-            .borrow_mut()
-            .insert(waiter_id, sender);
-        debug_assert!(previous.is_none());
-        Some(WriterInactivityWaiter {
-            lease: self,
-            waiter_id,
-            receiver,
-        })
     }
 }
 
-struct RuntimeWriterGuard {
-    lease: &'static RuntimeWriterLease,
+struct ExportResultWriterGuard {
+    group: Rc<ExportResultWriterGroup>,
 }
 
-impl Drop for RuntimeWriterGuard {
+impl Drop for ExportResultWriterGuard {
     fn drop(&mut self) {
-        let active_writers = self.lease.active_writers.get();
+        let active_writers = self.group.active_writers.get();
         debug_assert!(active_writers > 0);
         let active_writers = active_writers - 1;
-        self.lease.active_writers.set(active_writers);
-        if active_writers == 0 {
-            for (_, waiter) in self.lease.inactivity_waiters.borrow_mut().drain() {
-                let _ = waiter.send(());
-            }
+        self.group.active_writers.set(active_writers);
+        let drive_guard = if active_writers == 0 {
+            self.group.drive_guard.borrow_mut().take()
+        } else {
+            None
+        };
+        drop(drive_guard);
+    }
+}
+
+/// Restores the ambient export-result writer group even when `FromJs` panics.
+struct ExportResultConversionGuard {
+    state: &'static JsState,
+    previous_group: Option<Rc<ExportResultWriterGroup>>,
+    group: Rc<ExportResultWriterGroup>,
+}
+
+impl ExportResultConversionGuard {
+    fn new() -> Self {
+        Self::with_group(Rc::new(ExportResultWriterGroup::new()))
+    }
+
+    fn with_group(group: Rc<ExportResultWriterGroup>) -> Self {
+        let state = get_js_state();
+        let previous_group = state
+            .export_result_writer_group
+            .borrow_mut()
+            .replace(group.clone());
+        Self {
+            state,
+            previous_group,
+            group,
         }
     }
-}
 
-struct WriterActivationWaiter {
-    lease: &'static RuntimeWriterLease,
-    waiter_id: usize,
-    receiver: futures::channel::oneshot::Receiver<()>,
-}
-
-impl Future for WriterActivationWaiter {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.receiver).poll(cx).map(|_| ())
+    fn writer_group(&self) -> Option<Rc<ExportResultWriterGroup>> {
+        self.group.has_writers().then(|| self.group.clone())
     }
 }
 
-impl Drop for WriterActivationWaiter {
+impl Drop for ExportResultConversionGuard {
     fn drop(&mut self) {
-        self.lease
-            .activation_waiters
-            .borrow_mut()
-            .remove(&self.waiter_id);
+        *self.state.export_result_writer_group.borrow_mut() = self.previous_group.take();
     }
 }
 
-struct WriterInactivityWaiter {
-    lease: &'static RuntimeWriterLease,
-    waiter_id: usize,
-    receiver: futures::channel::oneshot::Receiver<()>,
+fn with_export_result_conversion<T>(
+    f: impl FnOnce() -> T,
+) -> (T, Option<Rc<ExportResultWriterGroup>>) {
+    let guard = ExportResultConversionGuard::new();
+    let result = f();
+    let writer_group = guard.writer_group();
+    drop(guard);
+    (result, writer_group)
 }
 
-impl Future for WriterInactivityWaiter {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.receiver).poll(cx).map(|_| ())
-    }
+fn from_js_export_result<'js, R>(
+    ctx: &Ctx<'js>,
+    value: Value<'js>,
+) -> (rquickjs::Result<R>, Option<Rc<ExportResultWriterGroup>>)
+where
+    R: FromJs<'js>,
+{
+    with_export_result_conversion(|| R::from_js(ctx, value))
 }
 
-impl Drop for WriterInactivityWaiter {
-    fn drop(&mut self) {
-        self.lease
-            .inactivity_waiters
-            .borrow_mut()
-            .remove(&self.waiter_id);
-    }
+fn current_export_result_writer_group() -> Option<Rc<ExportResultWriterGroup>> {
+    get_js_state().export_result_writer_group.borrow().clone()
+}
+
+fn with_export_result_writer_group<T>(
+    group: Rc<ExportResultWriterGroup>,
+    f: impl FnOnce() -> T,
+) -> T {
+    let guard = ExportResultConversionGuard::with_group(group);
+    let result = f();
+    drop(guard);
+    result
 }
 
 /// RAII guard that keeps a persistent rquickjs scheduler driver (`AsyncRuntime::drive`) running on
@@ -644,6 +668,21 @@ fn spawn_drive_guard(rt: &AsyncRuntime) -> DriveGuard {
     DriveGuard(handle)
 }
 
+/// Aborts every currently-unref'd timer so a pending [`AsyncRuntime::idle`] can return. Mirrors the
+/// Preview 2 helper of the same name in `internal/p2.rs`: the immutable count borrows taken by the
+/// caller are dropped before this runs, so taking the mutable borrows here is safe.
+fn abort_unrefed_timers(js_state: &JsState) {
+    let unrefed = js_state.unrefed_timers.borrow().clone();
+    let mut abort_handles = js_state.abort_handles.borrow_mut();
+    let mut unrefed_mut = js_state.unrefed_timers.borrow_mut();
+    for id in unrefed.iter() {
+        if let Some(handle) = abort_handles.remove(id) {
+            handle.abort();
+        }
+        unrefed_mut.remove(id);
+    }
+}
+
 /// Drains the JavaScript event loop before an exported call returns.
 ///
 /// After the export produces its result (a direct value or an awaited Promise) the P3 wrapper would
@@ -659,120 +698,34 @@ fn spawn_drive_guard(rt: &AsyncRuntime) -> DriveGuard {
 /// scheduler task started by the parked JS promise (`future<T>`/`stream<T>` writers) keeps being
 /// polled too.
 async fn drain_and_idle(js_state: &JsState) {
-    let mut drove_runtime = false;
-    loop {
-        let checkpoint_did_work = run_turn_checkpoint(js_state).await;
-        if drove_runtime && !checkpoint_did_work {
-            return;
-        }
-        drove_runtime = true;
-
-        let has_unrefed_timers = async_with!(js_state.ctx => |ctx| {
-            !ctx.userdata::<RuntimeServices>()
-                .expect("runtime services not initialized")
-                .timers
-                .unrefed_timers
-                .borrow()
-                .is_empty()
-        })
-        .await;
-        if has_unrefed_timers {
-            // Spawn a sentinel that polls until only unref'd timers remain, then aborts them so
-            // `idle()` can return. The sentinel is itself a spawned job (not tracked in
-            // `abort_handles`), so it does not perturb the comparison below.
-            async_with!(js_state.ctx => |ctx| {
-                let task_ctx = ctx.clone();
-                ctx.spawn(async move {
-                    loop {
-                        // 1ms poll interval (`wait_for` takes nanoseconds).
-                        wasip3::clocks::monotonic_clock::wait_for(1_000_000).await;
-                        let services = task_ctx
-                            .userdata::<RuntimeServices>()
-                            .expect("runtime services not initialized");
-                        let abort_count = services.timers.abort_handles.borrow().len();
-                        let unref_count = services.timers.unrefed_timers.borrow().len();
-                        // Once the only remaining timers are unref'd, abort them so the loop can
-                        // drain.
-                        if abort_count > 0 && abort_count == unref_count {
-                            services.timers.abort_unrefed();
-                            break;
-                        }
-                        if unref_count == 0 {
-                            break;
-                        }
-                    }
-                });
-            })
-            .await;
-        }
+    if js_state.unrefed_timers.borrow().is_empty() {
         js_state.rt.idle().await;
+        return;
     }
-}
-
-async fn run_turn_checkpoint(js_state: &JsState) -> bool {
+    // Spawn a sentinel that polls until only unref'd timers remain, then aborts them so `idle()`
+    // can return. The sentinel is itself a spawned job (not tracked in `abort_handles`), so it does
+    // not perturb the `abort_count == unref_count` comparison below.
     async_with!(js_state.ctx => |ctx| {
-        run_process_turn_checkpoint(&ctx).unwrap_or_else(|error| {
-            panic!("failed to run process turn checkpoint: {error}")
-        })
+        ctx.spawn(async {
+            loop {
+                // 1ms poll interval (`wait_for` takes nanoseconds).
+                wasip3::clocks::monotonic_clock::wait_for(1_000_000).await;
+                let state = get_js_state();
+                let abort_count = state.abort_handles.borrow().len();
+                let unref_count = state.unrefed_timers.borrow().len();
+                // Once the only remaining timers are unref'd, abort them so the loop can drain.
+                if abort_count > 0 && abort_count == unref_count {
+                    abort_unrefed_timers(state);
+                    break;
+                }
+                if unref_count == 0 {
+                    break;
+                }
+            }
+        });
     })
-    .await
-}
-
-/// Drains the runtime while detecting JavaScript producers created by the drain itself. The second
-/// activation poll handles the case where the final idle poll both creates a writer and completes;
-/// `select` polls its left-hand idle future first and would otherwise report a false quiescence.
-async fn drain_without_writer_activation(js_state: &'static JsState) -> bool {
-    let lease = &js_state.writer_lease;
-    let Some(activation) = lease.wait_for_activation_if_inactive() else {
-        return false;
-    };
-    let idle = Box::pin(drain_and_idle(js_state));
-    match futures::future::select(idle, Box::pin(activation)).await {
-        futures::future::Either::Left(((), activation)) => {
-            matches!(
-                futures::future::select(activation, futures::future::ready(())).await,
-                futures::future::Either::Right(_)
-            )
-        }
-        futures::future::Either::Right(((), _idle)) => false,
-    }
-}
-
-/// Releases one export's scheduler driver only after all JavaScript producers have finished and
-/// the shared runtime has reached quiescence. Keeping one cleanup future per driver preserves the
-/// component task's ownership: cancelling one export cannot orphan a driver retained by another.
-async fn cleanup_retained_driver(js_state: &'static JsState, drive_guard: DriveGuard) {
-    let lease = &js_state.writer_lease;
-
-    loop {
-        if let Some(inactivity) = lease.wait_for_inactivity_if_active() {
-            inactivity.await;
-        }
-        if drain_without_writer_activation(js_state).await {
-            break;
-        }
-    }
-    drop(drive_guard);
-}
-
-/// Completes an asynchronous export without waiting for runtime-global quiescence while a
-/// JavaScript producer is backpressured on a component future/stream that may only be consumed
-/// after the export result becomes visible to the host.
-///
-/// The activation waiter closes the check-before-idle race: `drain_and_idle` can itself execute a
-/// pending QuickJS job that creates such a writer. If that happens, the idle attempt is dropped and
-/// this export's scheduler driver is retained by the runtime lease. If the writer also finishes
-/// before the activation is observed, normal draining is retried.
-async fn finish_async_export(js_state: &'static JsState, mut drive_guard: DriveGuard) {
-    loop {
-        drive_guard = match js_state.writer_lease.retain_driver_if_active(drive_guard) {
-            Ok(()) => return,
-            Err(drive_guard) => drive_guard,
-        };
-        if drain_without_writer_activation(js_state).await {
-            return;
-        }
-    }
+    .await;
+    js_state.rt.idle().await;
 }
 
 pub async fn call_js_export<A, R>(
@@ -879,22 +832,23 @@ where
     // driven by `block_on`) never awaits a JS promise and never spawns scheduler tasks, so it must
     // NOT create a `DriveGuard`: a never-completing `rt.drive()` task spawned inside a `block_on`
     // would prevent it from returning.
-    let drive_guard = allow_async.then(|| spawn_drive_guard(&js_state.rt));
+    let mut drive_guard = allow_async.then(|| spawn_drive_guard(&js_state.rt));
 
-    let result = async_with!(js_state.ctx => |ctx| {
+    let (result, export_result_writer_group) = async_with!(js_state.ctx => |ctx| {
         drain_pending_resource_drops(&ctx);
 
         let (user_function, parent) =
             get_cached_js_export(js_state, &ctx, wit_package, function_path, args.num_args());
 
-        let writer_generation = js_state.writer_lease.writer_generation();
         let result: Result<Value, Error> = call_with_this(ctx.clone(), user_function, parent, args);
 
-        let result = match result {
+        match result {
             Err(Error::Exception) => {
                 let exception = ctx.catch();
-                if let Some(result) = try_map_exception(&ctx, &exception) {
-                    result
+                let (mapped, export_result_writer_group) =
+                    with_export_result_conversion(|| try_map_exception(&ctx, &exception));
+                if let Some(result) = mapped {
+                    (result, export_result_writer_group)
                 } else {
                     panic!("Exception during call of {fun}:\n{exception}", fun = function_path.join("."), exception = format_js_exception(&exception));
                 }
@@ -917,14 +871,20 @@ where
 
                     match promise_future.await {
                         Ok(value) => {
-                            let result = R::from_js(&ctx, value);
-                            map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for exported function {path}: {err}", path = function_path.join("."))))
+                            let (result, export_result_writer_group) =
+                                from_js_export_result::<R>(&ctx, value);
+                            (
+                                map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for exported function {path}: {err}", path = function_path.join(".")))),
+                                export_result_writer_group,
+                            )
                         }
                         Err(e) => match e {
                             Error::Exception => {
                                 let exception = ctx.catch();
-                                if let Some(result) = try_map_exception(&ctx, &exception) {
-                                    result
+                                let (mapped, export_result_writer_group) =
+                                    with_export_result_conversion(|| try_map_exception(&ctx, &exception));
+                                if let Some(result) = mapped {
+                                    (result, export_result_writer_group)
                                 } else {
                                     panic!("Exception during awaiting call result for {function_path}:\n{exception}", function_path = function_path.join("."), exception = format_js_exception(&exception))
                                 }
@@ -933,27 +893,29 @@ where
                         },
                     }
                 } else {
-                    let result = R::from_js(&ctx, value);
-                    map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for exported function {path}: {err}", path = function_path.join("."))))
+                    let (result, export_result_writer_group) =
+                        from_js_export_result::<R>(&ctx, value);
+                    (
+                        map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for exported function {path}: {err}", path = function_path.join(".")))),
+                        export_result_writer_group,
+                    )
                 }
             }
-        };
-        run_process_turn_checkpoint(&ctx)
-            .unwrap_or_else(|error| panic!("failed to run process turn checkpoint: {error}"));
-        let created_writer =
-            !allow_async && js_state.writer_lease.writer_generation() != writer_generation;
-        (result, created_writer)
+        }
     })
     .await;
-    let (result, created_writer) = result;
 
-    if let Some(drive_guard) = drive_guard {
-        finish_async_export(js_state, drive_guard).await;
-    } else if created_writer {
-        panic!(
-            "A synchronous exported function created a component future/stream writer that is \
-             still active. Declare the exported function as `async func` in WIT."
+    // Run any timers / spawned jobs the export merely scheduled before returning (see
+    // `drain_and_idle`). The `DriveGuard` above is still alive here, so the scheduler keeps being
+    // polled while the drain waits.
+    if let Some(writer_group) = export_result_writer_group {
+        writer_group.keep_driver_until_writers_finish(
+            drive_guard
+                .take()
+                .expect("an export-result writer requires an asynchronous scheduler driver"),
         );
+    } else if allow_async {
+        drain_and_idle(js_state).await;
     }
     result
 }
@@ -1006,14 +968,14 @@ pub async fn wizer_initialize() {
     .await;
     drain_and_idle(state).await;
 
-    let timers_empty = async_with!(state.ctx => |ctx| {
-        ctx.userdata::<RuntimeServices>()
-            .expect("runtime services not initialized")
-            .timers
-            .is_empty()
-    })
-    .await;
-    assert!(timers_empty, "pending timers/tasks at snapshot time");
+    assert!(
+        state.abort_handles.borrow().is_empty(),
+        "pending timers/tasks at snapshot time"
+    );
+    assert!(
+        state.unrefed_timers.borrow().is_empty(),
+        "unrefed timers still tracked at snapshot time"
+    );
 
     unsafe {
         INIT = InitState::WizerPreInitialized;
@@ -1078,7 +1040,7 @@ where
 {
     let js_state = ensure_initialized().await;
 
-    let (resource_id, created_writer) = async_with!(js_state.ctx => |ctx| {
+    async_with!(js_state.ctx => |ctx| {
         drain_pending_resource_drops(&ctx);
 
         let module: Object = ctx.globals().get("userModule").expect("Failed to get userModule");
@@ -1102,9 +1064,8 @@ where
             );
         }
 
-        let writer_generation = js_state.writer_lease.writer_generation();
         let result: Result<Object, Error> = constructor.construct(args);
-        let (resource_id, created_writer) = match result {
+        match result {
             Err(Error::Exception) => {
                 let exception = ctx.catch();
                 panic!("Exception during call of constructor {path}:\n{exception}", path = resource_path.join("."), exception = format_js_exception(&exception));
@@ -1113,49 +1074,15 @@ where
                 panic!("Error during call of constructor {path}: {e:?}", path = resource_path.join("."));
             }
             Ok(resource) => {
-                if js_state.writer_lease.writer_generation() != writer_generation {
-                    (0, true)
-                } else {
-                    let resource_id = get_free_resource_id();
-                    resource.set(RESOURCE_ID_KEY, resource_id).expect("Failed to set resource ID");
-                    let resource_table: Object = ctx.globals().get(RESOURCE_TABLE_NAME).expect("Failed to get the resource table");
-                    resource_table.set(resource_id.to_string(), resource.clone()).expect("Failed to store resource instance");
-                    let created_writer =
-                        js_state.writer_lease.writer_generation() != writer_generation;
-                    if created_writer {
-                        let _ = resource_table.remove(resource_id.to_string());
-                        let _ = resource.remove(RESOURCE_ID_KEY);
-                    }
-                    (resource_id, created_writer)
-                }
+                let resource_id = get_free_resource_id();
+                resource.set(RESOURCE_ID_KEY, resource_id).expect("Failed to set resource ID");
+                let resource_table: Object = ctx.globals().get(RESOURCE_TABLE_NAME).expect("Failed to get the resource table");
+                resource_table.set(resource_id.to_string(), resource).expect("Failed to store resource instance");
+                resource_id
             }
-        };
-        run_process_turn_checkpoint(&ctx)
-            .unwrap_or_else(|error| panic!("failed to run process turn checkpoint: {error}"));
-        let created_writer =
-            created_writer || js_state.writer_lease.writer_generation() != writer_generation;
-        if created_writer && resource_id != 0 {
-            let resource_table: Object = ctx
-                .globals()
-                .get(RESOURCE_TABLE_NAME)
-                .expect("Failed to get the resource table");
-            if let Ok(resource) = resource_table.get::<_, Object>(resource_id.to_string()) {
-                let _ = resource.remove(RESOURCE_ID_KEY);
-            }
-            let _ = resource_table.remove(resource_id.to_string());
         }
-        (resource_id, created_writer)
     })
-    .await;
-
-    if created_writer {
-        panic!(
-            "A synchronous exported resource constructor created a component future/stream \
-             writer. Constructors cannot be asynchronous; move this work to an async static or \
-             resource method."
-        );
-    }
-    resource_id
+    .await
 }
 
 /// Invokes an `async` method on an exported resource instance and awaits its result. Used by
@@ -1292,9 +1219,9 @@ where
     let js_state = ensure_initialized().await;
     // See `call_js_export_internal`: the async path drives the scheduler for the whole call; the
     // synchronous path (driven by `block_on`) must not, so it never returns a `DriveGuard`.
-    let drive_guard = allow_async.then(|| spawn_drive_guard(&js_state.rt));
+    let mut drive_guard = allow_async.then(|| spawn_drive_guard(&js_state.rt));
 
-    let result = async_with!(js_state.ctx => |ctx| {
+    let (result, export_result_writer_group) = async_with!(js_state.ctx => |ctx| {
         drain_pending_resource_drops(&ctx);
 
         let resource_table: Object = ctx.globals().get(RESOURCE_TABLE_NAME)
@@ -1322,13 +1249,14 @@ where
             );
         }
 
-        let writer_generation = js_state.writer_lease.writer_generation();
         let result: Result<Value, Error> = call_with_this(ctx.clone(), method, resource_instance, args);
-        let result = match result {
+        match result {
             Err(Error::Exception) => {
                 let exception = ctx.catch();
-                if let Some(result) = try_map_exception(&ctx, &exception) {
-                    result
+                let (mapped, export_result_writer_group) =
+                    with_export_result_conversion(|| try_map_exception(&ctx, &exception));
+                if let Some(result) = mapped {
+                    (result, export_result_writer_group)
                 } else {
                     panic!("Exception during call of method {name} in {path}:\n{exception}", path = resource_path.join("."), exception = format_js_exception(&exception));
                 }
@@ -1349,13 +1277,19 @@ where
                     let promise: Promise = value.into_promise().unwrap();
                     match promise.into_future::<Value>().await {
                         Ok(value) => {
-                            let result = R::from_js(&ctx, value);
-                            map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for method {name} in exported class {path}: {err}", path = resource_path.join("."))))
+                            let (result, export_result_writer_group) =
+                                from_js_export_result::<R>(&ctx, value);
+                            (
+                                map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for method {name} in exported class {path}: {err}", path = resource_path.join(".")))),
+                                export_result_writer_group,
+                            )
                         }
                         Err(Error::Exception) => {
                             let exception = ctx.catch();
-                            if let Some(result) = try_map_exception(&ctx, &exception) {
-                                result
+                            let (mapped, export_result_writer_group) =
+                                with_export_result_conversion(|| try_map_exception(&ctx, &exception));
+                            if let Some(result) = mapped {
+                                (result, export_result_writer_group)
                             } else {
                                 panic!("Exception during awaiting call result of method {name} in {path}:\n{exception}", path = resource_path.join("."), exception = format_js_exception(&exception));
                             }
@@ -1365,27 +1299,28 @@ where
                         }
                     }
                 } else {
-                    let result = R::from_js(&ctx, value);
-                    map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for method {name} in exported class {path}: {err}", path = resource_path.join("."))))
+                    let (result, export_result_writer_group) =
+                        from_js_export_result::<R>(&ctx, value);
+                    (
+                        map_result(result.unwrap_or_else(|err| panic!("Unexpected result value for method {name} in exported class {path}: {err}", path = resource_path.join(".")))),
+                        export_result_writer_group,
+                    )
                 }
             }
-        };
-        run_process_turn_checkpoint(&ctx)
-            .unwrap_or_else(|error| panic!("failed to run process turn checkpoint: {error}"));
-        let created_writer =
-            !allow_async && js_state.writer_lease.writer_generation() != writer_generation;
-        (result, created_writer)
+        }
     })
     .await;
-    let (result, created_writer) = result;
 
-    if let Some(drive_guard) = drive_guard {
-        finish_async_export(js_state, drive_guard).await;
-    } else if created_writer {
-        panic!(
-            "A synchronous exported resource method created a component future/stream writer \
-             that is still active. Declare the exported method as `async func` in WIT."
+    // Run any timers / spawned jobs the method merely scheduled before returning (see
+    // `drain_and_idle`).
+    if let Some(writer_group) = export_result_writer_group {
+        writer_group.keep_driver_until_writers_finish(
+            drive_guard
+                .take()
+                .expect("an export-result writer requires an asynchronous scheduler driver"),
         );
+    } else if allow_async {
+        drain_and_idle(js_state).await;
     }
     result
 }
@@ -1674,8 +1609,9 @@ pub fn format_caught_error(caught: CaughtError) -> String {
 // ---------------------------------------------------------------------------
 
 /// Awaits a JavaScript value, transparently resolving it if it is a promise, and converts the
-/// result to `R` without trapping so callers can perform required cleanup first.
-async fn try_resolve_js_value<'js, R>(ctx: &Ctx<'js>, value: Value<'js>) -> Result<R, String>
+/// result to `R`. Panics (traps) if the promise rejects or the value cannot be converted, since
+/// `future<T>` has no error channel.
+async fn resolve_js_value<'js, R>(ctx: &Ctx<'js>, value: Value<'js>) -> R
 where
     R: FromJs<'js>,
 {
@@ -1684,37 +1620,25 @@ where
             .into_promise()
             .expect("value.is_promise() returned true but conversion to Promise failed");
         match promise.into_future::<R>().await {
-            Ok(v) => Ok(v),
+            Ok(v) => v,
             Err(Error::Exception) => {
                 let exception = ctx.catch();
-                Err(format!(
+                panic!(
                     "A JavaScript promise backing a component future/stream payload rejected:\n{}",
                     format_js_exception(&exception)
-                ))
+                );
             }
-            Err(e) => Err(format!(
+            Err(e) => panic!(
                 "Error awaiting a JavaScript promise for a component future/stream payload: {e:?}"
-            )),
+            ),
         }
     } else {
-        R::from_js(ctx, value).map_err(|e| {
-            format!(
+        R::from_js(ctx, value).unwrap_or_else(|e| {
+            panic!(
                 "Failed to convert a JavaScript value to a component future/stream payload: {e:?}"
             )
         })
     }
-}
-
-/// Awaits a JavaScript value, transparently resolving it if it is a promise, and converts the
-/// result to `R`. Panics (traps) if the promise rejects or the value cannot be converted, since
-/// `future<T>` has no error channel.
-async fn resolve_js_value<'js, R>(ctx: &Ctx<'js>, value: Value<'js>) -> R
-where
-    R: FromJs<'js>,
-{
-    try_resolve_js_value(ctx, value)
-        .await
-        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 /// Calls an exported JS function and returns its raw return value (a promise or a plain value)
@@ -1735,7 +1659,7 @@ where
     // after this returns, so the guard only needs to cover the JS call itself.
     let _drive_guard = spawn_drive_guard(&js_state.rt);
 
-    let result = async_with!(js_state.ctx => |ctx| {
+    async_with!(js_state.ctx => |ctx| {
         drain_pending_resource_drops(&ctx);
 
         let (user_function, parent) =
@@ -1754,9 +1678,7 @@ where
             }
         }
     })
-    .await;
-    run_turn_checkpoint(js_state).await;
-    result
+    .await
 }
 
 /// The future produced by [`spawn_future_writer`], factored out so it can also be composed with
@@ -1799,36 +1721,6 @@ pub fn spawn_future_writer<T, R, F>(
     spawn_local(future_writer_task(js_value, writer, convert));
 }
 
-async fn try_close_js_stream_iterator(iterator: Persistent<Object<'static>>) -> Result<(), String> {
-    async_with!(get_js_state().ctx => |ctx| {
-        let iterator = iterator
-            .restore(&ctx)
-            .map_err(|error| format!("Failed to restore a persisted stream iterator during cleanup: {error:?}"))?;
-        let close: Function = ctx
-            .globals()
-            .get("__wasm_rquickjs_close_async_iterator")
-            .map_err(|error| format!("async-value helper __wasm_rquickjs_close_async_iterator is missing: {error:?}"))?;
-        let result: Value = close
-            .call((iterator,))
-            .map_err(|error| format!("Failed to close a component stream<T> iterator: {error:?}"))?;
-        let _: Value = try_resolve_js_value(&ctx, result).await?;
-        Ok(())
-    })
-    .await
-}
-
-async fn close_js_stream_iterator(iterator: Persistent<Object<'static>>) {
-    try_close_js_stream_iterator(iterator)
-        .await
-        .unwrap_or_else(|error| panic!("{error}"));
-}
-
-enum StreamWriterItem<T> {
-    Done,
-    Item(T),
-    PayloadError(String),
-}
-
 /// The future produced by [`spawn_stream_writer`], factored out so it can also be composed with
 /// an import call in a single wit-bindgen task (see [`drive_import_with_writers`]) instead of
 /// always being spawned as an independent task.
@@ -1869,9 +1761,9 @@ pub async fn stream_writer_task<T, R, F>(
     loop {
         // Clone the persisted iterator handle per iteration so the `async_with!` closure moves
         // a fresh clone each time rather than the shared handle (which the loop reuses).
-        let iterator_for_next = iterator.clone();
-        let item: StreamWriterItem<T> = async_with!(get_js_state().ctx => |ctx| {
-                let iterator = iterator_for_next
+        let iterator = iterator.clone();
+        let item: Option<T> = async_with!(get_js_state().ctx => |ctx| {
+                let iterator = iterator
                     .restore(&ctx)
                     .expect("Failed to restore a persisted stream iterator");
                 let next_fn: Function = iterator
@@ -1886,7 +1778,7 @@ pub async fn stream_writer_task<T, R, F>(
                     .unwrap_or_else(|| panic!("stream iterator next() did not resolve to an object"));
                 let done: bool = result_obj.get("done").unwrap_or(false);
                 if done {
-                    StreamWriterItem::Done
+                    None
                 } else {
                     let value: Value = result_obj
                         .get("value")
@@ -1894,31 +1786,21 @@ pub async fn stream_writer_task<T, R, F>(
                     // A sync iterable normalized into an async iterator can still yield
                     // promise-valued items; JS `for await` awaits each value (AsyncFromSyncIterator
                     // semantics), so resolve promises before converting to the payload type.
-                    match try_resolve_js_value::<R>(&ctx, value).await {
-                        Ok(r) => StreamWriterItem::Item(convert(r)),
-                        Err(error) => StreamWriterItem::PayloadError(error),
-                    }
+                    let r: R = resolve_js_value::<R>(&ctx, value).await;
+                    Some(convert(r))
                 }
             })
             .await;
 
         match item {
-            StreamWriterItem::Item(item) => {
+            Some(item) => {
                 if writer.write_one(item).await.is_some() {
-                    // The reader hung up; stop producing further items and await source cleanup.
-                    close_js_stream_iterator(iterator.clone()).await;
+                    // The reader hung up; stop producing further items.
                     break;
                 }
             }
-            StreamWriterItem::Done => {
+            None => {
                 break;
-            }
-            StreamWriterItem::PayloadError(error) => {
-                // `next()` succeeded and yielded an item, so close the iterator before surfacing
-                // the payload failure. Cleanup is best-effort here: the primary conversion or
-                // promise-rejection diagnostic must not be replaced by a secondary close error.
-                let _ = try_close_js_stream_iterator(iterator.clone()).await;
-                panic!("{error}");
             }
         }
     }
@@ -1988,16 +1870,30 @@ where
     R: for<'a> FromJs<'a> + 'static,
     F: FnOnce(R) -> T + 'static,
 {
-    future_writer_from_js_internal(ctx, value, writer, convert)
+    future_writer_from_js_internal(ctx, value, writer, convert, None)
 }
 
-type FutureWriterSlot<T, F> = Rc<RefCell<Option<(futures::channel::oneshot::Sender<T>, F)>>>;
+fn future_writer_from_js_in_export<'js, T, R, F>(
+    ctx: &Ctx<'js>,
+    value: Value<'js>,
+    writer: FutureWriter<T>,
+    convert: F,
+    writer_group: Rc<ExportResultWriterGroup>,
+) -> rquickjs::Result<()>
+where
+    T: 'static,
+    R: for<'a> FromJs<'a> + 'static,
+    F: FnOnce(R) -> T + 'static,
+{
+    future_writer_from_js_internal(ctx, value, writer, convert, Some(writer_group))
+}
 
 fn future_writer_from_js_internal<'js, T, R, F>(
     ctx: &Ctx<'js>,
     value: Value<'js>,
     writer: FutureWriter<T>,
     convert: F,
+    writer_group: Option<Rc<ExportResultWriterGroup>>,
 ) -> rquickjs::Result<()>
 where
     T: 'static,
@@ -2005,7 +1901,9 @@ where
     F: FnOnce(R) -> T + 'static,
 {
     let (tx, rx) = futures::channel::oneshot::channel::<T>();
-    let writer_guard = get_js_state().writer_lease.register_writer();
+    let writer_guard = writer_group
+        .as_ref()
+        .map(ExportResultWriterGroup::register_writer);
 
     // Pure write task: no `async_with!`, only component-model awaits.
     spawn_local(async move {
@@ -2030,13 +1928,20 @@ where
             .expect("value.is_promise() returned true but conversion to Promise failed");
         // `convert`/`tx` are single-use; a QuickJS callback must be `Fn`, so guard them behind a
         // shared cell that the fulfilled/rejected reactions take from (only one ever fires).
-        let slot: FutureWriterSlot<T, F> = Rc::new(RefCell::new(Some((tx, convert))));
+        let slot: Rc<RefCell<Option<(futures::channel::oneshot::Sender<T>, F)>>> =
+            Rc::new(RefCell::new(Some((tx, convert))));
         let slot_ok = slot.clone();
+        let writer_group_ok = writer_group.clone();
         let on_fulfilled = Function::new(ctx.clone(), move |resolved: Value<'_>| {
             if let Some((tx, convert)) = slot_ok.borrow_mut().take() {
                 // Derive the `Ctx` from the value so both share the same `'js` lifetime.
                 let cb_ctx = resolved.ctx().clone();
-                let wrapped = R::from_js(&cb_ctx, resolved).unwrap_or_else(|e| {
+                let converted = || R::from_js(&cb_ctx, resolved);
+                let wrapped = match writer_group_ok.clone() {
+                    Some(group) => with_export_result_writer_group(group, converted),
+                    None => converted(),
+                }
+                .unwrap_or_else(|e| {
                     panic!(
                         "Failed to convert a JavaScript value to a component future payload: {e:?}"
                     )
@@ -2051,7 +1956,11 @@ where
         let then: Function = promise.get("then")?;
         then.call::<_, ()>((This(promise.clone()), on_fulfilled, on_rejected))?;
     } else {
-        let wrapped = R::from_js(ctx, value)?;
+        let converted = || R::from_js(ctx, value);
+        let wrapped = match writer_group {
+            Some(group) => with_export_result_writer_group(group, converted),
+            None => converted(),
+        }?;
         let _ = tx.send(convert(wrapped));
     }
     Ok(())
@@ -2074,7 +1983,22 @@ where
     R: for<'a> FromJs<'a> + 'static,
     F: Fn(R) -> T + 'static,
 {
-    stream_writer_from_js_internal(ctx, value, writer, convert)
+    stream_writer_from_js_internal(ctx, value, writer, convert, None)
+}
+
+fn stream_writer_from_js_in_export<'js, T, R, F>(
+    ctx: &Ctx<'js>,
+    value: Value<'js>,
+    writer: StreamWriter<T>,
+    convert: F,
+    writer_group: Rc<ExportResultWriterGroup>,
+) -> rquickjs::Result<()>
+where
+    T: 'static,
+    R: for<'a> FromJs<'a> + 'static,
+    F: Fn(R) -> T + 'static,
+{
+    stream_writer_from_js_internal(ctx, value, writer, convert, Some(writer_group))
 }
 
 fn stream_writer_from_js_internal<'js, T, R, F>(
@@ -2082,6 +2006,7 @@ fn stream_writer_from_js_internal<'js, T, R, F>(
     value: Value<'js>,
     writer: StreamWriter<T>,
     convert: F,
+    writer_group: Option<Rc<ExportResultWriterGroup>>,
 ) -> rquickjs::Result<()>
 where
     T: 'static,
@@ -2092,9 +2017,13 @@ where
     // oneshot the task uses to acknowledge whether the stream should keep producing.
     let (cmd_tx, mut cmd_rx) =
         futures::channel::mpsc::unbounded::<(T, futures::channel::oneshot::Sender<bool>)>();
+    let writer_guard = writer_group
+        .as_ref()
+        .map(ExportResultWriterGroup::register_writer);
 
     // Pure write task: no `async_with!`, only component-model awaits.
     spawn_local(async move {
+        let _writer_guard = writer_guard;
         use futures::StreamExt as _;
         let mut writer = writer;
         while let Some((payload, ack)) = cmd_rx.next().await {
@@ -2115,66 +2044,51 @@ where
         drop(writer);
     });
 
-    let cmd_tx = Rc::new(RefCell::new(Some(cmd_tx)));
-    let writer_guard = Rc::new(RefCell::new(Some(
-        get_js_state().writer_lease.register_writer(),
-    )));
-    let cmd_tx_for_item = cmd_tx.clone();
+    let cmd_tx = Rc::new(cmd_tx);
+    let writer_group_for_item = writer_group.clone();
     // Returns a `Promised` (converted to a JS promise by rquickjs) that resolves to whether the
     // pump should keep producing. Returning `Promised` directly (rather than `into_js`-ing it here)
     // avoids tying an explicit `Value<'js>` return to the argument's invariant lifetime.
     let write_one = Function::new(ctx.clone(), move |item: Value<'_>| {
         // Derive the `Ctx` from the item so `from_js` uses the matching `'js` lifetime.
         let cb_ctx = item.ctx().clone();
-        let wrapped = R::from_js(&cb_ctx, item).map_err(|error| {
-            Exception::throw_message(
-                &cb_ctx,
-                &format!(
-                    "Failed to convert a JavaScript value to a component stream payload: {error:?}"
-                ),
-            )
-        })?;
+        let converted = || R::from_js(&cb_ctx, item);
+        let wrapped = match writer_group_for_item.clone() {
+            Some(group) => with_export_result_writer_group(group, converted),
+            None => converted(),
+        }
+        .unwrap_or_else(|e| {
+            panic!("Failed to convert a JavaScript value to a component stream payload: {e:?}")
+        });
         let payload = convert(wrapped);
         let (ack_tx, ack_rx) = futures::channel::oneshot::channel::<bool>();
         // If the pure task already exited (reader hung up) the send fails; report "stop".
-        let accepted = cmd_tx_for_item
-            .borrow()
-            .as_ref()
-            .is_some_and(|cmd_tx| cmd_tx.unbounded_send((payload, ack_tx)).is_ok());
-        Ok::<_, rquickjs::Error>(Promised(async move {
+        let accepted = cmd_tx.unbounded_send((payload, ack_tx)).is_ok();
+        Promised(async move {
             if accepted {
                 ack_rx.await.unwrap_or(false)
             } else {
                 false
             }
-        }))
+        })
     })?;
 
     let drive: Function = ctx
         .globals()
         .get("__wasm_rquickjs_drive_stream_param")
         .expect("async-value helper __wasm_rquickjs_drive_stream_param is missing");
-    // Keep nested export ownership until the pump has awaited iterator cleanup. Releasing it when
-    // the pure writer first observes peer drop can stop the QuickJS scheduler before `return()`
-    // settles.
+    // The pump returns a promise; attach a rejection handler so a throwing iterable traps with a
+    // clear diagnostic instead of surfacing as an unhandled rejection.
     let pump: Value = drive.call((value, write_one))?;
     if let Some(pump) = pump.as_promise() {
-        let cmd_tx_ok = cmd_tx.clone();
-        let writer_guard_ok = writer_guard.clone();
-        let on_fulfilled = Function::new(ctx.clone(), move |_value: Value<'_>| -> () {
-            cmd_tx_ok.borrow_mut().take();
-            writer_guard_ok.borrow_mut().take();
-        })?;
         let on_rejected = Function::new(ctx.clone(), move |reason: Value<'_>| -> () {
-            cmd_tx.borrow_mut().take();
-            writer_guard.borrow_mut().take();
             panic!(
                 "A JavaScript iterable backing a component stream failed:\n{}",
                 format_js_exception(&reason)
             );
         })?;
         let then: Function = pump.get("then")?;
-        then.call::<_, ()>((This(pump.clone()), on_fulfilled, on_rejected))?;
+        then.call::<_, ()>((This(pump.clone()), rquickjs::Undefined, on_rejected))?;
     }
     Ok(())
 }
@@ -2212,10 +2126,8 @@ pub async fn settle_import_promise<P>(
             Err(e) => panic!("Failed to convert an async import result to JavaScript: {e:?}"),
         }
         // Run the promise reaction jobs enqueued by resolve/reject (and any transitive
-        // continuations), including Node's end-of-turn rejection checkpoint.
-        run_process_turn_checkpoint(&ctx).unwrap_or_else(|error| {
-            panic!("failed to run process turn checkpoint after async import: {error}")
-        });
+        // continuations) so the JS `await` resumes and the root export's promise settles.
+        while ctx.execute_pending_job() {}
     })
     .await;
 }
@@ -2258,8 +2170,7 @@ pub fn async_value_default<T>() -> T {
 }
 
 /// Builds a JavaScript async-iterable that yields items pulled one at a time from a component
-/// stream reader, applying `wrap` to convert each payload to its JS representation. Returning or
-/// throwing into its iterator drops the component readable end.
+/// stream reader, applying `wrap` to convert each payload to its JS representation.
 ///
 /// Concurrent `next()` calls are serialized through an async mutex so a second pull started
 /// before the first resolves waits its turn instead of observing a premature end-of-stream.
@@ -2273,58 +2184,22 @@ where
     R: for<'a> IntoJs<'a> + 'static,
     F: Fn(T) -> R + Clone + 'static,
 {
-    let state = Rc::new(futures::lock::Mutex::new(Some(reader)));
-    let close_requested = Rc::new(Cell::new(false));
-    let active_pull = Rc::new(RefCell::new(None::<AbortHandle>));
-    let pull_state = state.clone();
-    let pull_close_requested = close_requested.clone();
-    let pull_active = active_pull.clone();
+    let state: Rc<futures::lock::Mutex<StreamReader<T>>> =
+        Rc::new(futures::lock::Mutex::new(reader));
     let pull = Function::new(ctx.clone(), move || {
-        let state = pull_state.clone();
-        let close_requested = pull_close_requested.clone();
-        let active_pull = pull_active.clone();
+        let state = state.clone();
         let wrap = wrap.clone();
         Promised(async move {
             let item: Option<T> = {
-                let mut state = state.lock().await;
-                if close_requested.get() {
-                    state.take();
-                    return IterResult(None);
-                }
-
-                let (handle, registration) = AbortHandle::new_pair();
-                let previous = active_pull.borrow_mut().replace(handle);
-                debug_assert!(previous.is_none());
-                let item = match state.as_mut() {
-                    Some(reader) => Abortable::new(reader.next(), registration)
-                        .await
-                        .ok()
-                        .flatten(),
-                    None => None,
-                };
-                active_pull.borrow_mut().take();
-                if item.is_none() {
-                    state.take();
-                }
-                item
+                let mut reader = state.lock().await;
+                reader.next().await
             };
             IterResult(item.map(&wrap))
         })
     })?;
 
-    let close = Function::new(ctx.clone(), move || {
-        close_requested.set(true);
-        if let Some(active_pull) = active_pull.borrow_mut().take() {
-            active_pull.abort();
-        }
-        let state = state.clone();
-        Promised(async move {
-            state.lock().await.take();
-        })
-    })?;
-
     let make: Function = ctx.globals().get("__wasm_rquickjs_make_async_iterable")?;
-    let iterable: Value = make.call((pull, close))?;
+    let iterable: Value = make.call((pull,))?;
     Ok(iterable)
 }
 
@@ -2429,7 +2304,11 @@ impl<'js, B: FuturePayloadBridge> IntoJs<'js> for FutureReaderWrapper<B> {
 impl<'js, B: FuturePayloadBridge> FromJs<'js> for FutureReaderWrapper<B> {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
         let (writer, reader) = B::channel();
-        future_writer_from_js(ctx, value, writer, B::unwrap)?;
+        if let Some(writer_group) = current_export_result_writer_group() {
+            future_writer_from_js_in_export(ctx, value, writer, B::unwrap, writer_group)?;
+        } else {
+            future_writer_from_js(ctx, value, writer, B::unwrap)?;
+        }
         Ok(Self { reader })
     }
 }
@@ -2466,7 +2345,11 @@ impl<'js, B: StreamPayloadBridge> IntoJs<'js> for StreamReaderWrapper<B> {
 impl<'js, B: StreamPayloadBridge> FromJs<'js> for StreamReaderWrapper<B> {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> rquickjs::Result<Self> {
         let (writer, reader) = B::channel();
-        stream_writer_from_js(ctx, value, writer, B::unwrap)?;
+        if let Some(writer_group) = current_export_result_writer_group() {
+            stream_writer_from_js_in_export(ctx, value, writer, B::unwrap, writer_group)?;
+        } else {
+            stream_writer_from_js(ctx, value, writer, B::unwrap)?;
+        }
         Ok(Self { reader })
     }
 }

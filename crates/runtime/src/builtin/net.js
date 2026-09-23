@@ -114,7 +114,6 @@ function deferred(fn) {
 
 function createHandleWrap() {
     return {
-        writeQueueSize: 0,
         setKeepAlive() {},
         set_keep_alive() {},
         set_no_delay() {},
@@ -1054,49 +1053,18 @@ Socket.prototype._write = function _write(chunk, encoding, callback) {
 
     const data = typeof chunk === 'string' ? Buffer.from(chunk, encoding) : chunk;
     const buf = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-    const handle = this._handle;
-    handle.writeQueueSize += buf.byteLength;
+    const byteArray = Array.from(buf);
 
     (async () => {
         try {
-            const written = await handle.write(buf);
+            const written = await this._handle.write(byteArray);
             this._bytesDispatched += written;
             this._resetTimeout();
             callback(null);
         } catch (e) {
             callback(parseNativeError(e));
-        } finally {
-            handle.writeQueueSize = Math.max(0, handle.writeQueueSize - buf.byteLength);
         }
     })();
-};
-
-Socket.prototype._writev = function _writev(chunks, callback) {
-    const buffers = chunks.map(({ chunk, encoding }) => (
-        typeof chunk === 'string'
-            ? Buffer.from(chunk, encoding)
-            : Buffer.isBuffer(chunk)
-                ? chunk
-                : Buffer.from(chunk)
-    ));
-    const totalLength = buffers.reduce((total, buffer) => total + buffer.length, 0);
-
-    // Coalesce ordinary corked writes (notably HTTP response framing) while
-    // bounding the temporary Buffer.concat allocation for large batches.
-    if (totalLength <= 64 * 1024) {
-        this._write(Buffer.concat(buffers, totalLength), 'buffer', callback);
-        return;
-    }
-
-    let index = 0;
-    const writeNext = (error) => {
-        if (error || index === buffers.length) {
-            callback(error || null);
-            return;
-        }
-        this._write(buffers[index++], 'buffer', writeNext);
-    };
-    writeNext();
 };
 
 Socket.prototype._final = function _final(callback) {
@@ -1170,17 +1138,9 @@ Socket.prototype._resetTimeout = function _resetTimeout() {
     if (this._timeoutValue > 0) {
         this._clearTimeout();
         this._timeout = globalThis.setTimeout(() => {
-            this._onTimeout();
+            this.emit('timeout');
         }, this._timeoutValue);
     }
-};
-
-Socket.prototype._onTimeout = function _onTimeout() {
-    if (this._handle && this._handle.writeQueueSize > 0) {
-        this._resetTimeout();
-        return;
-    }
-    this.emit('timeout');
 };
 
 Socket.prototype._clearTimeout = function _clearTimeout() {

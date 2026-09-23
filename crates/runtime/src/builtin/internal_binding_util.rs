@@ -61,16 +61,6 @@ pub mod native_module {
         Ok(details.into_value())
     }
 
-    #[rquickjs::function]
-    pub fn package_deprecation_warning_seen(ctx: Ctx<'_>, key: String) -> bool {
-        crate::internal::node_package_deprecation_warning_seen(&ctx, &key)
-    }
-
-    #[rquickjs::function]
-    pub fn mark_package_deprecation_warning_seen(ctx: Ctx<'_>, key: String) {
-        crate::internal::mark_node_package_deprecation_warning_seen(&ctx, key);
-    }
-
     fn get_proxy_target_or_null<'js>(ctx: &Ctx<'js>, proxy: &Value<'js>) -> Value<'js> {
         let raw = unsafe { qjs::JS_GetProxyTarget(ctx.as_raw().as_ptr(), proxy.as_raw()) };
         value_or_null(ctx, raw)
