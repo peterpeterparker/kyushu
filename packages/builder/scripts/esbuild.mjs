@@ -19,6 +19,11 @@ const buildNode = () => {
       platform: "node",
       target: ["node20", "esnext"],
       external: externalPeerDependencies,
+      // Restores access to globalThis.require for @kyushu/worker, which the runtime shadows
+      // with `var require;`. See cli/src/javascript/bundler.rs for more details.
+      banner: {
+        js: "var require = globalThis.require;",
+      },
     })
     .catch(() => process.exit(1));
 };
