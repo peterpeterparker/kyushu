@@ -1,52 +1,23 @@
-use crate::bindings::wasi::http::types::{
-    Fields, IncomingRequest, Method, OutgoingBody, OutgoingResponse, ResponseOutparam,
-};
+use crate::bindings::wasi::http::types::{ErrorCode, Method, Request, Response};
+use crate::bindings::wit_future;
+use crate::response::stream_response;
 use crate::types::{Body, HttpMethod, JsRequest, JsResponse};
 use rquickjs::{CatchResultExt, IntoJs, Module};
 
-pub fn handle(request: IncomingRequest, response_out: ResponseOutparam) {
-    let js_request = extract_request(request);
-
-    let result = kyushu_runtime::internal::async_exported_function(run_js(js_request));
+pub async fn handle(request: Request) -> Result<Response, ErrorCode> {
+    let js_request = extract_request(request).await;
 
     let JsResponse {
         status,
         body,
         headers,
-    } = result.unwrap_or_else(|e| JsResponse {
+    } = run_js(js_request).await.unwrap_or_else(|e| JsResponse {
         status: 500,
         body: Some(Body::Text(format!("Error: {e}"))),
         headers: vec![],
     });
 
-    let fields = Fields::new();
-    for (k, v) in &headers {
-        fields.append(k, v.as_bytes()).ok();
-    }
-
-    let resp = OutgoingResponse::new(fields);
-    resp.set_status_code(status)
-        .expect("Failed to set status code");
-
-    let body_out = resp.body().expect("Failed to get outgoing body");
-    ResponseOutparam::set(response_out, Ok(resp));
-
-    if let Some(body) = body {
-        let bytes = body.into_bytes();
-
-        // blocking_write_and_flush perform a write of up to 4096 bytes
-        // https://github.com/WebAssembly/wasi-io/blob/main/imports.md#methodoutput-streamblocking-write-and-flush-func
-        // https://github.com/bytecodealliance/wasmtime/issues/9653
-        let out = body_out.write().expect("Failed to get body write stream");
-        for chunk in bytes.chunks(4096) {
-            out.blocking_write_and_flush(chunk)
-                .expect("Failed to write body");
-        }
-
-        drop(out);
-    }
-
-    OutgoingBody::finish(body_out, None).expect("Failed to finish body");
+    stream_response(status, headers, body)
 }
 
 fn method_to_string(method: Method) -> String {
@@ -64,14 +35,16 @@ fn method_to_string(method: Method) -> String {
     }
 }
 
-fn extract_request(request: IncomingRequest) -> JsRequest {
-    let method = HttpMethod::from(method_to_string(request.method()).as_str());
-    let path = request.path_with_query().unwrap_or_else(|| "/".to_string());
+async fn extract_request(request: Request) -> JsRequest {
+    let method = HttpMethod::from(method_to_string(request.get_method()).as_str());
+    let path = request
+        .get_path_with_query()
+        .unwrap_or_else(|| "/".to_string());
     let url = format!("http://localhost{path}");
 
     let headers: Vec<(String, String)> = request
-        .headers()
-        .entries()
+        .get_headers()
+        .copy_all()
         .into_iter()
         .filter_map(|(k, v)| String::from_utf8(v).ok().map(|v| (k, v)))
         .collect();
@@ -82,25 +55,19 @@ fn extract_request(request: IncomingRequest) -> JsRequest {
         Some(headers)
     };
 
-    let body = request.consume().ok().and_then(|incoming_body| {
-        let stream = incoming_body.stream().ok()?;
-        let mut bytes = Vec::new();
-        loop {
-            match stream.blocking_read(4096) {
-                Ok(chunk) if chunk.is_empty() => break,
-                Ok(chunk) => bytes.extend_from_slice(&chunk),
-                Err(_) => break,
-            }
+    let (res_tx, res_rx) = wit_future::new(|| Ok::<(), ErrorCode>(()));
+    let (body_rx, _trailers) = Request::consume_body(request, res_rx);
+    let bytes = body_rx.collect().await;
+    drop(res_tx);
+
+    let body = if bytes.is_empty() {
+        None
+    } else {
+        match String::from_utf8(bytes) {
+            Ok(s) => Some(Body::Text(s)),
+            Err(e) => Some(Body::Bytes(e.into_bytes())),
         }
-        if bytes.is_empty() {
-            None
-        } else {
-            match String::from_utf8(bytes) {
-                Ok(s) => Some(Body::Text(s)),
-                Err(e) => Some(Body::Bytes(e.into_bytes())),
-            }
-        }
-    });
+    };
 
     JsRequest {
         method,
@@ -111,7 +78,7 @@ fn extract_request(request: IncomingRequest) -> JsRequest {
 }
 
 async fn run_js(request: JsRequest) -> Result<JsResponse, String> {
-    let js_state = kyushu_runtime::internal::get_js_state();
+    let js_state = kyushu_runtime::internal::ensure_initialized().await;
 
     let result = js_state
         .ctx

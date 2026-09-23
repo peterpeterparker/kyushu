@@ -1,19 +1,20 @@
 #[allow(warnings)]
 mod bindings {
-    wit_bindgen::generate!({
+    wit_bindgen_p3::generate!({
         path: "wit",
         world: "kyushu:worker/worker",
-        runtime_path: "wit_bindgen_rt",
+        runtime_path: "wit_bindgen_p3::rt",
         generate_all,
     });
 }
 mod handler;
+mod response;
 mod runtime;
 mod setup;
 mod types;
 
-use bindings::exports::wasi::http::incoming_handler::Guest as HttpGuest;
-use bindings::wasi::http::types::{IncomingRequest, ResponseOutparam};
+use bindings::exports::wasi::http::handler::Guest as HttpGuest;
+use bindings::wasi::http::types::{ErrorCode, Request, Response};
 
 struct Worker;
 
@@ -32,8 +33,8 @@ impl bindings::Guest for Worker {
 }
 
 impl HttpGuest for Worker {
-    fn handle(request: IncomingRequest, response_out: ResponseOutparam) {
-        handler::handle(request, response_out);
+    async fn handle(request: Request) -> Result<Response, ErrorCode> {
+        handler::handle(request).await
     }
 }
 

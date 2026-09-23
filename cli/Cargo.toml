@@ -12,14 +12,17 @@ path = "src/main.rs"
 local-worker = []
 
 [dependencies]
-wasmtime = "44.0.1"
-wasmtime-wasi = "44.0.1"
-wasmtime-wasi-http = { version = "44.0.1", features = ["p2"] }
-wasmtime-wizer = { version = "44.0.1", features = ["component-model", "wasmtime"] }
+wasmtime = "49.0.0"
+wasmtime-wasi = { version = "49.0.0", features = ["p3"] }
+wasmtime-wasi-http = { version = "49.0.0", features = ["p3"] }
+wasmtime-wizer = { version = "49.0.0", features = ["component-model", "wasmtime"] }
 tokio = { version = "1", features = ["net", "rt-multi-thread", "macros"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 hyper = { version = "1", features = ["http1", "server"] }
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
 serde = { version = "1.0.228", features = ["derive"] }
 toml = "1.1.2"
 rolldown = "1.0.0"

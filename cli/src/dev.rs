@@ -1,7 +1,7 @@
 use crate::assets::load_assets;
 use crate::config::{AssetsConfig, DevConfig, InputConfig, WorkerConfig};
 use crate::javascript::bundle;
-use crate::server;
+use crate::server::{self, ResponseBody};
 use crate::worker::{WORKER_TEMPLATE, WorkerContext, WorkerLinker, WorkerState};
 use anyhow::Result;
 use notify::RecursiveMode;
@@ -11,8 +11,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use wasmtime::Store;
 use wasmtime::component::{Component, InstancePre};
-use wasmtime_wasi_http::p2::bindings::ProxyIndices;
-use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
+use wasmtime_wasi_http::p3::bindings::ServiceIndices;
 
 pub async fn dev(
     dev_config: &DevConfig,
@@ -22,7 +21,7 @@ pub async fn dev(
 ) -> Result<()> {
     let port = dev_config.port();
 
-    // Unlike the runner which loads a pre-built Wizer snapshot via ProxyPre,
+    // Unlike the runner which loads a pre-built Wizer snapshot via ServicePre,
     // dev mode skips Wizer entirely and holds a raw InstancePre. kyu-initialize
     // is called fresh on each request to initialize the JS runtime with the current bundle.
     let instance_pre = Arc::new(RwLock::new(
@@ -139,7 +138,7 @@ async fn handle_request(
     instance_pre: Arc<RwLock<InstancePre<WorkerState>>>,
     config: WorkerConfig,
     req: hyper::Request<hyper::body::Incoming>,
-) -> Result<hyper::Response<HyperOutgoingBody>> {
+) -> Result<hyper::Response<ResponseBody>> {
     let instance_pre = instance_pre.read().await.clone();
 
     let mut store = Store::new(
@@ -168,12 +167,12 @@ async fn handle_request(
         .await
         .map_err(|e| anyhow::anyhow!("kyu-initialize failed: {e:?}"))?;
 
-    // Construct a Proxy from the already-initialized instance using ProxyIndices,
+    // Construct a Service from the already-initialized instance using ServiceIndices,
     // so handle runs on the same instance that kyu-initialize ran on.
-    let proxy = ProxyIndices::new(&instance_pre)
-        .map_err(|e| anyhow::anyhow!("failed to create ProxyIndices: {e:?}"))?
+    let service = ServiceIndices::new(&instance_pre)
+        .map_err(|e| anyhow::anyhow!("failed to create ServiceIndices: {e:?}"))?
         .load(&mut store, &instance)
-        .map_err(|e| anyhow::anyhow!("failed to load Proxy from instance: {e:?}"))?;
+        .map_err(|e| anyhow::anyhow!("failed to load Service from instance: {e:?}"))?;
 
-    server::dispatch(proxy, store, req).await
+    server::dispatch(service, store, req).await
 }
