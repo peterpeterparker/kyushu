@@ -7,7 +7,12 @@ repository = "https://github.com/peterpeterparker/kyushu"
 
 [workspace.dependencies]
 rquickjs = { version = "0.12.2", features = ["macro", "futures", "std", "bindgen", "loader"] }
-wit-bindgen-p3 = { package = "wit-bindgen", version = "0.62.0", default-features = false, features = ["async", "async-spawn", "macros", "inter-task-wakeup"] }
+wit-bindgen-p3 = { package = "wit-bindgen", version = "0.62.0", default-features = false, features = [
+  "async",
+  "async-spawn",
+  "macros",
+  "inter-task-wakeup",
+] }
 
 # wstd is pinned in runtime source
 wstd = "=0.6.5"
