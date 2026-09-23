@@ -43,4 +43,5 @@ world worker {
 
   // Exposes the worker version, baked in at compile time via CARGO_PKG_VERSION.
   export kyu-version: func() -> string;
+
 }
