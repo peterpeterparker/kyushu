@@ -93,7 +93,7 @@ pub async fn dispatch(
                 let (done_tx, done_rx) = oneshot::channel::<()>();
 
                 let response = response.map(|body| {
-                    NotifyOnDrop {
+                    BodyWithDoneSignal {
                         body: body.map_err(|e| anyhow::anyhow!("{e:?}")).boxed_unsync(),
                         _done: done_tx,
                     }
@@ -119,13 +119,14 @@ pub async fn dispatch(
     }
 }
 
-/// Notifies the dispatcher when hyper drops the body.
-struct NotifyOnDrop {
+/// Signals the dispatcher once hyper drops the body, so it keeps the worker's event loop
+/// running until the body has been fully streamed.
+struct BodyWithDoneSignal {
     body: ResponseBody,
     _done: oneshot::Sender<()>,
 }
 
-impl Body for NotifyOnDrop {
+impl Body for BodyWithDoneSignal {
     type Data = Bytes;
     type Error = anyhow::Error;
 
