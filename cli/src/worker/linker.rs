@@ -14,6 +14,7 @@ impl WorkerLinker {
     pub fn new() -> Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model_async(true);
+
         let engine = Engine::new(&config)?;
 
         let mut linker: Linker<WorkerState> = Linker::new(&engine);
