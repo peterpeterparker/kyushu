@@ -18,3 +18,6 @@ minimumReleaseAge: 2880 # ignore dependency updates released less than 2 days ag
 
 minimumReleaseAgeExclude:
   - kyushu-types@0.1.0
+  - "@astrojs/markdown-satteri@0.4.2"
+  - "@astrojs/starlight@0.42.3"
+  - astro@7.3.4
