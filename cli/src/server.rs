@@ -13,9 +13,9 @@ use std::task::{Context, Poll};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use wasmtime::Store;
+use wasmtime_wasi_http::default_hooks;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::p3::bindings::Service;
-use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
 
 pub type ResponseBody = UnsyncBoxBody<Bytes, anyhow::Error>;
 
@@ -63,8 +63,7 @@ pub async fn dispatch(
     mut store: Store<WorkerState>,
     req: Request<Incoming>,
 ) -> Result<Response<ResponseBody>> {
-    let req = req.map(|body| body.map_err(ErrorCode::from_hyper_request_error));
-    let (req, req_io) = wasmtime_wasi_http::p3::Request::from_http(req);
+    let (req, req_io) = wasmtime_wasi_http::p3::Request::from_http(default_hooks(), req);
 
     let (tx, rx) = oneshot::channel::<Result<Response<ResponseBody>>>();
 

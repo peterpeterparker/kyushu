@@ -63,7 +63,7 @@ async fn bundle_js(
     // Empty WASI context — no preopened dirs or env vars to snapshot.
     let mut store = Store::new(&engine, WorkerContext::new().inherit_stdio().build());
 
-    let initialized = Wizer::new()
+    let (initialized, _) = Wizer::new()
         .keep_init_func(true)
         .init_func("wizer-initialize")
         .run_component(

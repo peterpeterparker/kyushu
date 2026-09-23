@@ -2,7 +2,7 @@ use crate::config::{EnvConfig, MountConfig, NetworkConfig};
 use crate::worker::state::WorkerState;
 use anyhow::Result;
 use wasmtime::component::ResourceTable;
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder};
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder};
 use wasmtime_wasi_http::WasiHttpCtx;
 
 pub struct WorkerContext {
@@ -31,13 +31,12 @@ impl WorkerContext {
     }
 
     fn with_mount(mut self, host: &str, guest: &str, writable: bool) -> Result<Self> {
-        let (dir_perms, file_perms) = if writable {
-            (DirPerms::all(), FilePerms::all())
+        let perms = if writable {
+            FsPerms::ReadWrite
         } else {
-            (DirPerms::READ, FilePerms::READ)
+            FsPerms::ReadOnly
         };
-        self.wasi
-            .preopened_dir(host, guest, dir_perms, file_perms)?;
+        self.wasi.preopened_dir(host, guest, perms)?;
         Ok(self)
     }
 
